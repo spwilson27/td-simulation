@@ -1,0 +1,16 @@
+[project]
+name = "td-simulations"
+version = "0.1.0"
+description = "Real-time and baked fluid/fire/particle/destruction simulations for TouchDesigner"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["python", "scripts"]

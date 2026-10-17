@@ -1,0 +1,104 @@
+{
+  "compute2d_float32": {
+    "ok": true,
+    "texel_15_7": [
+      15.0,
+      7.0,
+      15007.5,
+      -7.25
+    ],
+    "expected": [
+      15.0,
+      7.0,
+      15007.5,
+      -7.25
+    ],
+    "log": "=============\nCompute Shader Compile Results:\n\nCompiled Successfully"
+  },
+  "compute3d_texture": {
+    "ok": true,
+    "texel_3_2_5": [
+      3.0,
+      2.0,
+      5.0,
+      1.0
+    ],
+    "expected": [
+      3.0,
+      2.0,
+      5.0,
+      1.0
+    ],
+    "log": "=============\nCompute Shader Compile Results:\n\nCompiled Successfully\nVertex Shader Compile Results:\n\nCompiled Successfully\n\n=============\nPixel Shader Compile Results:\n\nCompiled Successfully"
+  },
+  "multipass_pixel": {
+    "ok": true,
+    "r_g": [
+      4.0,
+      6.0
+    ],
+    "feeds_back": true,
+    "utdpass_sum": 6.0,
+    "note": "r=4 means pass k reads pass k-1 via input 0; g=6 means uTDPass counts 0..3",
+    "log": "Vertex Shader Compile Results:\n\nCompiled Successfully\n\n=============\nPixel Shader Compile Results:\n\nCompiled Successfully"
+  },
+  "multipass_compute_readwrite": {
+    "ok": true,
+    "r_g": [
+      4.0,
+      6.0
+    ],
+    "log": "=============\nCompute Shader Compile Results:\n\nCompiled Successfully"
+  },
+  "atomic_shared_uint": {
+    "ok": true,
+    "min_max": [
+      64.0,
+      64.0
+    ],
+    "log": "=============\nCompute Shader Compile Results:\n\nCompiled Successfully"
+  },
+  "atomic_counter": {
+    "ok": false,
+    "n_unique": 1,
+    "max": 0,
+    "log": "=============\nCompute Shader Compile Results:\nERROR: /probe/acnt_src:5: 'counter' : undeclared identifier \nERROR: 1 compilation errors.  No code generated.",
+    "note": "not needed: shared-memory atomics cover workgroup reductions"
+  },
+  "atomic_image_float": {
+    "ok": false,
+    "value": 0.699999988079071,
+    "expected": 256.0,
+    "log": "=============\nCompute Shader Compile Results:\n\n\nGLSL extension 'GL_EXT_shader_atomic_float' not supported on this GPU.",
+    "note": "without float atomics, FLIP particle-to-grid uses a gather over binned particles"
+  },
+  "exr_roundtrip": {
+    "ok": true,
+    "rgba32float": {
+      "max_abs_diff": 0.0
+    },
+    "rgba16float": {
+      "max_abs_diff": 0.0
+    },
+    "rg32float": {
+      "max_abs_diff": 0.0
+    },
+    "mono32float": {
+      "max_abs_diff": 0.0
+    },
+    "small_64x32_loads": false,
+    "note": "Movie File In fails to open EXRs only a few rows tall (64x32, 256x8); 96x96 and up load fine"
+  },
+  "exr_save_1024": {
+    "ok": true,
+    "sync_ms": 25.21,
+    "async_supported": true,
+    "async_call_ms": 0.31,
+    "bytes": 391718
+  },
+  "_env": {
+    "td": "099.2025.32820",
+    "os": "macOS 15.5"
+  },
+  "_probed_at": "2026-10-16T19:26:32"
+}

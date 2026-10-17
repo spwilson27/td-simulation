@@ -1,0 +1,129 @@
+{
+  "seconds": 3.0,
+  "cook_rate": 60,
+  "gpuCookTime_unit": "ms",
+  "note": "Other TouchDesigner instances on this machine share the GPU.",
+  "runs": [
+    {
+      "name": "preview",
+      "preset": "preview",
+      "res": [
+        512,
+        512
+      ],
+      "substeps": 1,
+      "jacobi": 20,
+      "uncapped_fps": 119.06,
+      "uncapped_frames": 362,
+      "realtime_fps": 60.01,
+      "realtime_frames": 182,
+      "uncapped_step_fps": 119.06,
+      "realtime_step_fps": 60.01,
+      "gpuCookTime_ms": {
+        "advect_scalars": 0.0147,
+        "advect_vel": 0.0102,
+        "combust": 0.021,
+        "divergence": 0.0216,
+        "forces": 0.0445,
+        "jacobi": 9.2332,
+        "mac_scalars": 0.0325,
+        "mac_vel": 0.0272,
+        "project": 0.0226,
+        "render": 0.0136
+      },
+      "gpuCookTime_ms_sum": 9.4411
+    },
+    {
+      "name": "realtime",
+      "preset": "realtime",
+      "res": [
+        1024,
+        1024
+      ],
+      "substeps": 1,
+      "jacobi": 30,
+      "uncapped_fps": 120.0,
+      "uncapped_frames": 365,
+      "realtime_fps": 60.0,
+      "realtime_frames": 182,
+      "uncapped_step_fps": 120.0,
+      "realtime_step_fps": 60.0,
+      "gpuCookTime_ms": {
+        "advect_scalars": 0.0342,
+        "advect_vel": 0.026,
+        "combust": 0.1264,
+        "divergence": 0.1337,
+        "forces": 0.1361,
+        "jacobi": 9.2332,
+        "mac_scalars": 0.0938,
+        "mac_vel": 0.0703,
+        "project": 0.002,
+        "render": 0.0729
+      },
+      "gpuCookTime_ms_sum": 9.9286
+    },
+    {
+      "name": "1536",
+      "preset": "realtime",
+      "res": [
+        1536,
+        1536
+      ],
+      "substeps": 1,
+      "jacobi": 30,
+      "uncapped_fps": 87.14,
+      "uncapped_frames": 268,
+      "realtime_fps": 60.01,
+      "realtime_frames": 182,
+      "uncapped_step_fps": 87.14,
+      "realtime_step_fps": 60.01,
+      "gpuCookTime_ms": {
+        "advect_scalars": 0.2287,
+        "advect_vel": 0.5121,
+        "combust": 0.2713,
+        "divergence": 0.304,
+        "forces": 0.4692,
+        "jacobi": 9.2332,
+        "mac_scalars": 0.3161,
+        "mac_vel": 0.2676,
+        "project": 0.3304,
+        "render": 0.1556
+      },
+      "gpuCookTime_ms_sum": 12.0882
+    },
+    {
+      "name": "2048",
+      "preset": "realtime",
+      "res": [
+        2048,
+        2048
+      ],
+      "substeps": 1,
+      "jacobi": 30,
+      "uncapped_fps": 37.94,
+      "uncapped_frames": 118,
+      "realtime_fps": 60.03,
+      "realtime_frames": 189,
+      "uncapped_step_fps": 37.94,
+      "realtime_step_fps": 41.92,
+      "gpuCookTime_ms": {
+        "advect_scalars": 0.2287,
+        "advect_vel": 0.5121,
+        "combust": 0.2713,
+        "divergence": 0.304,
+        "forces": 0.4692,
+        "jacobi": 9.2332,
+        "mac_scalars": 0.3161,
+        "mac_vel": 0.2676,
+        "project": 0.3304,
+        "render": 0.1556
+      },
+      "gpuCookTime_ms_sum": 12.0882,
+      "gpuCookTime_stale": true
+    }
+  ],
+  "gpuCookTime_note": "The multipass jacobi TOP reported the same gpuCookTime at every resolution, so that timestamp had latched. A later row marked gpuCookTime_stale repeated the previous row's whole sample. Uncapped fps is the cost that tracked resolution.",
+  "uncapped_note": "preview, realtime reached about 120 fps with realTime off, consistent with a 120 Hz refresh cap. That figure is a lower bound on throughput, not a measured GPU ceiling.",
+  "realtime_preset_fps": 60.0,
+  "acceptance_30fps": true
+}

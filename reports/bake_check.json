@@ -1,0 +1,48 @@
+{
+  "frames": 40,
+  "preset": "realtime",
+  "full_bake": {
+    "status": "complete: 40 frames in 5.2s",
+    "baking": false,
+    "frame": 40,
+    "cache": "complete",
+    "realtime": true,
+    "seconds": 5.35,
+    "fps": 7.48
+  },
+  "cancelled": {
+    "status": "cancelled: 22 frames in 2.4s",
+    "baking": false,
+    "frame": 22,
+    "cache": "partial",
+    "realtime": true
+  },
+  "resume_started": "baking frame 23 / 40",
+  "resumed": {
+    "status": "complete: 18 frames in 3.9s",
+    "baking": false,
+    "frame": 40,
+    "cache": "complete",
+    "realtime": true
+  },
+  "resume_identical": {
+    "files": 120,
+    "same_names": true,
+    "mismatched": []
+  },
+  "stale": {
+    "before": "complete",
+    "after_change": "stale",
+    "restored": "complete"
+  },
+  "replay": {
+    "status": "fluid2d 1024x1024 complete",
+    "frame": 40,
+    "clock_frame": 40,
+    "render_max_abs_diff": 0.0,
+    "scalars_max_abs_diff": 0.0,
+    "half_frame_max_err": 0.0008544921875,
+    "neighbour_frames_differ": 1.6640625
+  },
+  "cache_bytes": 214095940
+}
