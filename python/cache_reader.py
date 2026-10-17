@@ -53,22 +53,48 @@ class CacheReader:
             dims = f"{m.res[0]}x{m.res[1]}x{m.res[2]}"
         else:
             dims = f"{m.res[0]}x{m.res[1]}"
-        p.Status = f"{m.sim} {dims} {state}"
-        for field in m.fields:
+        member = self._member()
+        if member:
+            p.Status = f"group {member} {dims} {state}"
+        else:
+            p.Status = f"{m.sim} {dims} {state}"
+        fields, info = self._active()
+        res = info["res"] if info else m.res
+        extra = (info or {}).get("extra") or m.extra or {}
+        for field in fields:
             self._ensure_field(field)
-            if len(m.res) >= 3:
-                layout = (m.extra or {}).get("atlas") or self.cache.atlas_layout(m.res[:3])
-                self._ensure_volume(field, layout, m.fields[field])
+            if len(res) >= 3:
+                layout = extra.get("atlas") or self.cache.atlas_layout(res[:3])
+                self._ensure_volume(field, layout, fields[field])
 
     def _blend(self):
         p = self.ownerComp.par
         return self.cache.blend_frames(p.Frame.eval(), int(p.Framestart.eval()), int(p.Frameend.eval()))
 
+    def _member(self) -> str | None:
+        m = self.manifest
+        if m is None or not m.members:
+            return None
+        name = str(self.ownerComp.par.Member.eval()).strip()
+        if name in m.members:
+            return name
+        return next(iter(m.members))
+
+    def _active(self):
+        m = self.manifest
+        member = self._member()
+        if member:
+            return m.members[member]["fields"], m.members[member]
+        return m.fields, None
+
     def Path(self, field: str, which: int = 0) -> str:
-        if self.manifest is None or field not in self.manifest.fields:
+        if self.manifest is None:
+            return ""
+        fields, _info = self._active()
+        if field not in fields:
             return ""
         a, b, _ = self._blend()
-        return str(self.cache.frame_path(self.CacheDir, field, b if which else a))
+        return str(self.cache.frame_path(self.CacheDir, field, b if which else a, self._member()))
 
     def Weight(self) -> float:
         if self.manifest is None or not self.ownerComp.par.Interpolate.eval():
@@ -135,7 +161,8 @@ class CacheReader:
     def Load(self, frame: float) -> None:
         """Jump to a frame and load it now (Movie File In otherwise loads on its next cook)."""
         self.ownerComp.par.Frame = frame
-        for field in self.manifest.fields if self.manifest else ():
+        fields = self._active()[0] if self.manifest else {}
+        for field in fields:
             for name in (f"{field}_a", f"{field}_b", f"{field}_x", f"{field}_out", f"{field}_vol"):
                 top = self.ownerComp.op(name)
                 if top is not None:

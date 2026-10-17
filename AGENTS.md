@@ -72,14 +72,28 @@ DATs file-synced to the repo.
 - The same pull means a later script can recook the 3D solver and move the live snapshot off the frame just
   saved. A byte-exact replay compare has to run in the same `execute_python` as the `Tick` that saved it.
 - Movie File In's default index is `me.time.frame`, which rewrites the frame number inside an EXR path.
-  Cache-reader movies are created with `playmode` locked so they open the path they are given.
+  Cache-reader movies are created with `playmode` locked so they open the path they are given. Every Movie File In
+  that loads a cache frame needs this, including the sims' `load_*` resume loaders. Unlocked resume loaders made
+  3D bake resume flaky (pressure files differed after resume, depending on the timeline frame). `outputresolution`
+  `useinput` on a loader with no input keeps a stale picture: set custom resolution to the state texture, index
+  constant 0, and pulse Reload. An RGBA float EXR with either edge under 256 is misread (a 128² particle state
+  did not round-trip; 256² did).
 - A GLSL TOP vector-uniform sequence cannot be set to 0 blocks (the minimum is 1).
+- A Geometry COMP is created with a torus POP whose render flag is on. Destroy that torus or every Render TOP that includes the geometry draws it on top of the particles.
+- A million point sprites should be instanced from one point (`TDInstanceID` fetches the particle texel). Building a `toptoPOP` with one point per texel was several times slower. `TDPos()` is the vertex position; a raw `P` attribute is not. `gl_PointSize` is in pixels. With antialiasing off (`aa1`) and the point snapped to a pixel centre, additive blending (`source one`, `destination one`, depth off, order-independent) sums overlapping particles exactly.
+- Sampling a fluid output recooks the solver when that output's input is dirty, which the clock does every step. An inactive Cache TOP does not stop it. Particle steps therefore bypass the bus branch they are not using, so a 2D step does not pull the 3D solver. Particle state is a locked Null TOP. A Feedback TOP in that graph captured one new frame and then held it.
+- A size-1 Cache TOP records one image per TouchDesigner frame. Several `Tick`s inside one script leave `vel_out` / `scalars_out` on the first of those steps, so a scripted render has to copy the solved null with the Replace Pulse (`replacespulse`) after each tick and save the picture in a later call. The Active Pulse is deferred until the script returns. Leave `replace` off after the pulse or a later read records another solver step and the bake replay diverges.
+- Particle sprites and the force splat have to take their world position from the state texture. `TDPos()` is only the single instanced point, which sits at the origin and lands on the clip edge. GLSL MAT sampler names are `samplerNname` / `samplerNtop`. Parameter expressions are Python, so a C ternary in a resolution or select expression does not cook.
+- A Render TOP in order-independent transparency mode does not clear uncovered float pixels, so point sprites leave large negative alpha in the background. The beauty pass uses ordinary blending with background alpha 0, then a clamp, and `beauty` is that clamped picture (`alpha >= 0`).
+- The baker's Group Sims list bakes every named sim into one cache (`<cache>/<sim>/<field>/`). Empty Group Sims is the single-sim layout from phases 1 and 2. Resume calls `SetInit` on every member. The cache reader's Member parameter picks which sim to play. A group bake does not listen to the clock: `PumpOnce` ticks, then saves. The timeline execute has to be off for that stretch, or it steps frames the baker never writes. The 2D force and source grids are saved with the frame and published again before the resumed fluid step, because that step runs before the particles rewrite them.
+- A particle step has to integrate position and velocity from the same previous snapshot. Writing the new position snapshot before the velocity cook makes a resumed step (still reading the loaded frame) disagree with a continuous one. Leave those solved nulls locked afterwards so a save does not integrate a second time.
+- The reaction a particle writes into the bus is `Couplingstrength * mass * drag * (v_p - v_f) / (density * cell volume)`, with `Particlemass` stored in nanograms. The 2D splat is one 32² workgroup of shared integer atomics, so a million light embers stay a small acceleration. Heat uses the same mass ratio. The bus merge is selected by a parameter, so the particle step has to cook it or the fluid never sees the new grid. While advecting on the bus, position and velocity are snapped to 1e-4 (velocity biased by one fluid bin) so a resumed sample that is one quantize step off stays on the same side of the boundary. Constant-velocity tracers are not snapped.
+- A particle bake leaves `SetInit` on the Movie File In. Call `SetInit(None)` before the next live step or the integrator reads the cache. The same run can leave the cache reader's `Frame` expression and the clock seed off their fluid defaults. `bake_check` and the phase 2 resume match the committed sequence only after that expression is `op.simclock.par.Frame`, Interpolate is on, and the seed is 0.
 
 ## Phase plan
 1. Done: clock, bus, baker, cache reader, GPU probe, 2D smoke/fire.
 2. Done: 3D bus, 128³ fluid, raymarched volume, analytic and mesh SDFs, damped multigrid pressure, slice-atlas caches.
-3. GPU particles: millions, advected by bus velocity (2D+3D), SDF collisions, emitted from sims, two-way via
-   additive-blend splats into bus sources/forces; particle caches.
+3. Done: GPU particles, 1024² state textures, bus advection in 2D and 3D, SDF collisions, field emission, additive instanced splats into bus forces and sources, EXR caches with resume and exact replay.
 4. High-res baked smoke/fire: 256^3+ bakes, real-time detail upres on playback, cache size reduction (field
    selection, half precision, crop, async save). Must fix the pressure solve first: the Phase 2 multigrid (coarse
    gain 0.05) and Jacobi 12 each remove only ~10-15% of divergence RMS per projection, which is not incompressible.
@@ -91,3 +105,11 @@ DATs file-synced to the repo.
    or screen-space), interaction with obstacles/destruction/smoke.
 7. Cloth: XPBD on GPU, bus wind, SDF collision, tearing, optional two-way air coupling; baked high-res.
 8. Integration: scene/preset system, cross-camp showcase scenes, performance pass, render/export outputs, docs.
+   Phase 3 debt to clear here: the deterministic 2D particle splat (`shaders/particles/splat_sum.glsl`) sums all
+   particles in ONE workgroup into a 32×32 grid (coarse coupling, ~45 fps with the 2D fluid); move it to a full-res
+   multi-workgroup fixed-point sum (probe integer image atomics on r32i, else per-tile shared sums + a reduce pass).
+   Particle pos/vel are snapped to 1e-4 under bus advection (`step.glsl`) to hide a sub-ulp difference in the first
+   resumed fluid sample; a coupled group-bake resume still differs by one snap step in a few pvel values
+   (validate_phase3 tolerates ≤ 2.5e-4 in pvel only). Find the real source and make coupled resume byte-exact.
+   Fluid2D also snaps vel/pressure to 1e-5 and scalars to 1e-4 every step (`q_*` / `quantize.glsl`), added for the
+   same reason; test removing it once the splat is deterministic (it costs three passes and kills smoke < 5e-5).

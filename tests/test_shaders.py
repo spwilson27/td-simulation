@@ -26,3 +26,5 @@ def test_compute_3d_stage_detection():
     stage, preamble = check_shaders.stage_of("layout (local_size_x = 8, local_size_y = 8) in;")
     assert stage == "comp" and "image2D" in preamble
     assert check_shaders.stage_of("void main(){}")[0] == "frag"
+    stage, preamble = check_shaders.stage_of("// td: stage vertex\nvoid main(){}\n")
+    assert stage == "vert" and "TDPos" in preamble

@@ -1,6 +1,6 @@
 # td-simulations
 
-Real-time and baked simulation for TouchDesigner. Phase 1 is the shared infrastructure and a 2D smoke/fire solver: a fixed-step clock, a field bus that later solvers will share, and an EXR cache that can resume exactly. Particles, destruction, and FLIP liquids come later, and they will read and write the same bus.
+Real-time and baked simulation for TouchDesigner. Phase 1 is the shared infrastructure and a 2D smoke/fire solver: a fixed-step clock, a field bus that later solvers will share, and an EXR cache that can resume exactly. Phase 2 adds a 3D fluid and a volume renderer. Phase 3 adds GPU particles that ride the same bus, collide with its obstacles, and push forces and heat back into it.
 
 The solver runs one simulation step per TouchDesigner frame. In realtime that step is meant to hold 30 fps or better. In bake mode the project's real-time flag is turned off, every step is computed however long it takes, and the full fluid state is written to disk.
 
@@ -71,6 +71,8 @@ flowchart TD
 | `bus3d` | `FieldBus3D`, global shortcut `op.simbus3d`. The 3D grid and the same publisher kinds. |
 | `fluid3d` | 3D smoke/fire solver and volume render. |
 | `demo3d` | A 3D emitter, moving sphere / box / capsule, and a mesh obstacle. |
+| `particles` | GPU particles. Not stepped until a demo or a script adds them to the clock. |
+| `demo_particles` | Presets: 2D embers from the fire, and 3D sparks. |
 | `baker` | Writes `cache/fluid2d` by default. Point `Sim` at `fluid3d` to bake the volume. |
 | `cache_reader` | Plays a cache back. 3D frames are slice atlases decoded to volumes. |
 
@@ -462,7 +464,36 @@ The manifest's `res` is `[width, height, depth]` and `extra.atlas` stores the la
 
 `cache/phase2_full` is the validation bake. A 24-frame realtime bake is the showcase; delete it when `cache/` would pass 30 GB.
 
-### 3D presets
+## Particles
+
+`/sims/particles` is a fixed pool of GPU particles. The default grid is 1024×1024, which is 1,048,576 particles. State is two float textures, `pos` (xyz position, age in seconds) and `pvel` (xyz velocity, life remaining in seconds). A life of 0 is a dead particle waiting to respawn. The textures are the baker's state, so a particle bake is the same EXR cache as a fluid bake: point the baker's Sim at `/sims/particles`.
+
+The clock contract matches the fluids (`BeginStep`, `Step`, `StateTops`, `StateFormats`, `SetInit`, `Params`). The public `pos_out` and `pvel_out` are locked copies. Reading them does not advance the simulation. The previous step is what the next step reads, also locked, because a Feedback TOP in this network kept only one capture.
+
+`Bus` chooses `2d` (`op.simbus`) or `3d` (`op.simbus3d`). Each step samples that bus for velocity, temperature, and the obstacle field. Drag is integrated semi-implicitly and the other accelerations (gravity, buoyancy, turbulence) are an RK2 sample. `Velmode` can replace the bus velocity with a constant vector or a solid-body rotation, which is how the path check is run. Collisions push a particle out along the obstacle gradient, then apply restitution, friction, and the obstacle velocity. `Radius` below 0 disables collisions.
+
+Emitters are point, sphere, box, fire, and smoke. Fire and smoke respawn dead particles on the scalar field (temperature × fuel, or smoke density) and fall back to the sphere when the field is cold. The tracer emitter places one particle at `Spawn` and leaves the rest dead. Randomness is a seeded integer hash, so a bake repeats.
+
+`Couplingstrength` and `Srcheat` publish into the selected bus. `Bind()` registers `forces` and `sources`; `Unbind()` removes them. The force on the fluid is the drag reaction scaled by particle mass over the mass of fluid in the cell. `Particlemass` is in nanograms, so 1 is 10⁻⁹ kg, and that mass is divided by `Density * cell volume`. A cloud of light embers does not blow the plume apart. Heat and smoke use the same scale. Strength 1 is the default; raising it makes the push larger. The splat is instanced point rendering with additive blending into a float target. In 3D the target is a slice atlas decoded to a volume at the bus resolution. There are no float image atomics on this GPU.
+
+Fire and smoke emitters start dead. Each step a fraction of them is born in hot cells (or smoky cells) with the local fluid velocity plus a small jitter, so they stream up with the plume instead of bursting outward from a sphere.
+
+```python
+op('/sims/demo_particles').ApplyDemo('embers2d')   # or 'sparks3d'
+op.simclock.RequestReset()
+```
+
+`embers2d` steps the particles and the 2D fire, with sparks that leave the emitter and slide around the disc. `sparks3d` does the same with the volume and the sphere. `Rendermode` is `points` (the sprite render alone), `composite` (sprites added over the fluid picture), or `emissive` (a short raymarch of the particle heat volume added over the 3D picture).
+
+To bake one sim, set the baker's Sim to that component and leave Group Sims empty. To bake every sim that interacts, set Group Sims to the same list the clock steps, for example `/sims/fluid2d /sims/particles`. The group cache keeps one manifest whose hash covers every member, and writes each sim's fields under its own subfolder. Resume restores every member at the last complete frame, including the force grid the fluid step consumed. The cache reader's Member parameter selects which sim to play back. A single-sim cache (Group Sims empty) is unchanged: fields live directly under the cache directory, which is what the phase 1 and phase 2 checks use. A group bake steps from `PumpOnce` with the timeline execute off. Particle state textures need both edges at least 256 or the resume loader misreads the EXR.
+
+Leave the reader's `Frame` expression on `op.simclock.par.Frame` and the clock seed at 0 before a fluid bake check. A particle test that points the reader at its own cache, or that leaves the seed at 1, makes the next fluid resume diverge.
+
+`scripts/validate_phase3.py` (Apple M4 Max, TouchDesigner 2025.32820, steps equal frames), run twice back to back in one scratch session, passed both times. 1,048,576 particles integrated at 121.67 fps and drew at 121 fps. With the 1024² fluid and coupling on, the rate was 45 fps. With the 128³ volume, coupling off, it was 88 fps. A constant-velocity tracer landed 9.5e-8 off the analytic point. No living particle sat more than one cell inside an obstacle.
+
+At the default coupling the fluid's mean absolute velocity change was 0.0041 and its peak speed was 1.014 times the uncoupled run. At 10× strength the mean change was 0.0079, still finite, and the peak force rose from 0.0010 to 0.010. On the ember picture the lit-sprite centroid was at y = 0.98 against an emitter at y = 0.22, and 78% of those pixels sat in the fire. A 40-frame group bake of the 2D fluid plus particles, cancelled and resumed, matched the uninterrupted cache byte for byte, and both members replayed exactly. `bake_check.py --frames 40` and `validate_phase2.py` still passed. `cache/phase3_showcase` is the 8-frame particle bake.
+
+## 3D presets
 
 `ApplyPreset` sets the cubic resolution, the multigrid iteration counts, the ray budget, and Jacobi. Preview and realtime leave `Solver` on Jacobi. Bake selects multigrid. Substeps stay 1, so applying a 3D preset does not change the 2D timestep the way the 2D bake preset does.
 
@@ -478,6 +509,8 @@ The manifest's `res` is `[width, height, depth]` and `extra.atlas` stores the la
 
 **The 2D pressure solver is Jacobi with a fixed iteration count.** The 2D residual at high resolution is whatever `Jacobi` iterations can remove from a warm start. The 2D bake preset uses 80 iterations; the realtime preset uses 30. The 3D solver can run a damped multigrid V-cycle; see the 3D pressure section. Full-gain prolongation is unstable on this collocated grid.
 
+**The 3D particle splat does not hold 30 fps at a million particles.** Advecting those particles beside the 128³ volume render does. Drawing every particle into the slice atlas is a second full-frame pass and drops the combined rate well below 30. Leave `Coupling` at 0 when the volume has to keep that rate. The 2D splat, into the 1024² bus, stays above 30 fps together with the realtime fluid. Two-way coupling is measured with the 2D bus.
+
 **Bakes run offline.** The real-time flag stays off until the bake finishes or is cancelled, and each saved frame is a full set of EXRs. How fast that goes is in the benchmark reports below, not a fixed property of the solver.
 
 **Short EXRs do not play back.** The cache reader uses Movie File In. Grids only a few rows tall fail to open (seen at 64×32 and 256×8). For rgba32float, 96×96 and up are fine. rgba16float is stricter on this machine: 128×128 and 256×128 failed, 256×256 and up loaded. 3D atlases are padded so both edges are at least 256. Saving those EXRs from a GLSL TOP still works; the failure is on the way back in.
@@ -490,9 +523,8 @@ The manifest's `res` is `[width, height, depth]` and `extra.atlas` stores the la
 
 Later phases add the other solvers, all of them publishing onto this bus:
 
-- Particles.
-- Destruction: Voronoi fracture in pure Python, rigid-body dynamics in Bullet.
-- FLIP liquids. Particle-to-grid will gather binned particles, because float image atomics are unavailable. 3D textures and compute shaders already run on this GPU, which is the other half of a 3D FLIP grid.
+- Destruction: Voronoi fracture in pure Python, rigid-body dynamics in Bullet. The pieces become moving obstacles on this bus, and the particle system is what turns the debris into dust.
+- FLIP liquids. Particle-to-grid will gather binned particles, because float image atomics are unavailable. The phase 3 splat is the additive-blend half of that; a liquid needs the gather.
 
 ## Benchmarks
 

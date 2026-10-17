@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "OpenEXR>=3.3", "numpy"]
 
 [tool.setuptools]
 packages = []

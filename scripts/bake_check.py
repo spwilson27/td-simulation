@@ -26,6 +26,7 @@ CONFIG = r'''
 import json
 b = op('/sims/baker')
 b.par.Sim = '/sims/fluid2d'
+b.par.Groupsims = ''
 op.simclock.par.Sims = '/sims/fluid2d'
 op('/sims/fluid2d').ApplyPreset({preset!r})
 b.par.Cachedir = {cache!r}
@@ -75,7 +76,8 @@ project.folder and r.op('render_out').save(project.folder + '/reports/frame_cach
 op('/sims/fluid2d/render_out').save(project.folder + '/reports/frame_live_end.png')
 print('@@JSON@@' + json.dumps({{'status': r.par.Status.eval(), 'frame': end, 'clock_frame': op.simclock.par.Frame.eval(),
     'render_max_abs_diff': float(np.abs(live - cached).max()), 'scalars_max_abs_diff': float(np.abs(live_sc - cached_sc).max()),
-    'half_frame_max_err': float(np.abs(mid - 0.5 * (a_sc + b_sc)).max()), 'neighbour_frames_differ': float(np.abs(a_sc - b_sc).max())}}))
+    'half_frame_max_err': float(np.abs(mid - 0.5 * (a_sc + b_sc)).max()), 'neighbour_frames_differ': float(np.abs(a_sc - b_sc).max()),
+    'scalars_abs_max': float(max(np.abs(a_sc).max(), np.abs(b_sc).max()))}}))
 r.par.Frame.expr = 'op.simclock.par.Frame'
 '''
 
@@ -137,9 +139,11 @@ def main(argv=None) -> int:
     sizes = sum(p.stat().st_size for p in a)
     report["cache_bytes"] = sizes
     (ROOT / "reports" / "bake_check.json").write_text(json.dumps(report, indent=2) + "\n")
+    # Scalars are rgba16float: allow one half-precision ulp at the largest magnitude (2^-10 relative), floor 1e-3.
+    blend_tol = max(1e-3, report["replay"].get("scalars_abs_max", 0.0) * 2.0 ** -10)
     ok = (report["full_bake"]["cache"] == "complete" and not mismatched and report["resume_identical"]["same_names"]
           and report["stale"]["after_change"] == "stale" and report["stale"]["restored"] == "complete"
-          and report["replay"]["render_max_abs_diff"] == 0.0 and report["replay"]["half_frame_max_err"] < 1e-3)
+          and report["replay"]["render_max_abs_diff"] == 0.0 and report["replay"]["half_frame_max_err"] < blend_tol)
     print("ALL OK" if ok else "CHECK FAILED")
     return 0 if ok else 1
 

@@ -35,6 +35,11 @@ class Fluid2D:
     def Step(self) -> None:
         # A Feedback TOP only captures its target on frames where it cooked itself. On reset steps the loop Switch
         # does not pull it, so cook it explicitly or the next step would replay the state from before the reset.
+        # Unlock the public snapshots first. They are locked at the end of the step so a particle read cannot
+        # recook the solver and move the frame that was just saved.
+        for field in STATE:
+            self.ownerComp.op(field + "_out").lock = False
+            self.ownerComp.op(field + "_state").lock = False
         for field in STATE:
             self.ownerComp.op("fb_" + field).cook()
         for field in STATE:
@@ -42,14 +47,38 @@ class Fluid2D:
         # Snapshot the solved fields into the public *_out Cache TOPs, then set them inactive. A Cache TOP that is
         # inactive does not cook its input, so a later read of vel_out / scalars_out / pressure_out (the bus, a
         # viewer, the bake replay) cannot run the feedback loop again. That extra cook used to advance the live
-        # state one step past the frame the baker had just saved.
+        # state one step past the frame the baker had just saved. One TouchDesigner frame records a single cache
+        # entry, which is what a timeline bake does. A script that ticks several steps has to call Snapshot().
         for field in STATE:
+            # Replace Pulse copies the solved null immediately. An Active cook records only one
+            # image per TouchDesigner frame and would leave the bus on the frame loaded at resume.
             held = self.ownerComp.op(field + "_out")
-            held.par.active = True
-            held.cook(force=True)
-            held.par.active = False
+            held.lock = False
+            held.par.replace = True
+            held.par.replaceindex = 0
+            held.par.replacespulse.pulse()
+            held.par.replace = False
+            held.lock = True
         if self.ownerComp.par.Cookrender.eval():
             self.ownerComp.op("render_out").cook()
+
+    def Snapshot(self) -> None:
+        """Store the latest solved frame. Needed when several Ticks run in one script.
+
+        A size-1 Cache TOP records one image per TouchDesigner frame. The Replace Pulse
+        copies the solved null immediately. Replace is turned off before the function
+        returns so the pulse is not still armed for a later read.
+        """
+        for field in STATE:
+            held = self.ownerComp.op(field + "_out")
+            held.lock = False
+            held.par.replace = True
+            held.par.replaceindex = 0
+            held.par.replacespulse.pulse()
+            held.par.replace = False
+            held.lock = True
+        if self.ownerComp.par.Cookrender.eval():
+            self.ownerComp.op("render_out").cook(force=True)
 
     # -- state for the baker ----------------------------------------------------------------------------------
     def StateTops(self) -> dict:
@@ -64,7 +93,16 @@ class Fluid2D:
             load = self.ownerComp.op("load_" + field)
             choose = self.ownerComp.op("init_" + field)
             if paths:
+                state = self.ownerComp.op(field + "_state")
                 load.par.file = str(paths[field])
+                load.par.playmode = "locked"
+                load.par.index.mode = ParMode.CONSTANT  # noqa: F821
+                load.par.index = 0
+                # useinput ignores a file that has no wired input and shows a stale image.
+                load.par.outputresolution = "custom"
+                load.par.resolutionw = state.width
+                load.par.resolutionh = state.height
+                load.par.reloadpulse.pulse()
                 load.cook(force=True)
                 choose.par.index = 1
             else:

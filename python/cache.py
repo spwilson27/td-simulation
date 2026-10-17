@@ -68,6 +68,9 @@ class Manifest:
     frames_written: int = 0
     td_version: str = ""
     extra: dict = field(default_factory=dict)
+    # Empty for a single-sim cache. A group cache maps sim name -> {params, fields, res, bounds, extra}
+    # and stores frames under <cache>/<sim>/<field>/.
+    members: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.param_hash:
@@ -118,12 +121,20 @@ def read_manifest(cache_dir) -> Manifest | None:
         return None
 
 
-def frame_path(cache_dir, field_name: str, frame: int) -> Path:
-    return Path(cache_dir) / field_name / f"{field_name}.{int(frame):05d}.exr"
+def frame_path(cache_dir, field_name: str, frame: int, sim: str | None = None) -> Path:
+    """EXR path for one field. `sim` selects a member subfolder of a group cache."""
+    root = Path(cache_dir) / sim if sim else Path(cache_dir)
+    return root / field_name / f"{field_name}.{int(frame):05d}.exr"
+
+
+def _frame_slots(manifest: Manifest) -> list[tuple[str | None, str]]:
+    if manifest.members:
+        return [(sim, name) for sim, info in manifest.members.items() for name in info["fields"]]
+    return [(None, name) for name in manifest.fields]
 
 
 def frame_exists(cache_dir, manifest: Manifest, frame: int) -> bool:
-    return all(frame_path(cache_dir, f, frame).is_file() for f in manifest.fields)
+    return all(frame_path(cache_dir, name, frame, sim).is_file() for sim, name in _frame_slots(manifest))
 
 
 def resume_frame(cache_dir, manifest: Manifest) -> int:
@@ -227,6 +238,25 @@ def clear_cache(cache_dir, manifest: Manifest | None = None) -> int:
     """Delete the manifest and frame files this module writes (nothing else). Returns the number of files removed."""
     root = Path(cache_dir)
     removed = 0
+    if manifest is not None and manifest.members:
+        for sim, info in manifest.members.items():
+            for name in info.get("fields", {}):
+                d = root / sim / name
+                if not d.is_dir():
+                    continue
+                for f in d.glob(f"{name}.*.exr"):
+                    f.unlink()
+                    removed += 1
+                if not any(d.iterdir()):
+                    d.rmdir()
+            sim_dir = root / sim
+            if sim_dir.is_dir() and not any(sim_dir.iterdir()):
+                sim_dir.rmdir()
+        mp = manifest_path(root)
+        if mp.is_file():
+            mp.unlink()
+            removed += 1
+        return removed
     if manifest is not None:
         fields = list(manifest.fields)
     elif root.is_dir():

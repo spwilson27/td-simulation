@@ -50,6 +50,20 @@ vec3 TDRGBToHSV(vec3 c) {{ return c; }}
 PIXEL = COMMON + """in vec3 vUV;
 vec4 TDOutputSwizzle(vec4 c) { return c; }
 uvec4 TDOutputSwizzle(uvec4 c) { return c; }
+vec2 TDPointCoord() { return vec2(0.5); }
+"""
+
+VERTEX = COMMON + """
+vec3 TDPos() { return vec3(0.0); }
+vec3 TDNormal() { return vec3(0.0, 0.0, 1.0); }
+vec3 TDTexCoord(uint layer) { return vec3(0.0); }
+vec4 TDDeform(vec3 p) { return vec4(p, 1.0); }
+vec4 TDWorldToProj(vec3 p) { return vec4(p, 1.0); }
+vec4 TDWorldToProj(vec4 p) { return p; }
+int TDInstanceID() { return 0; }
+void TDWritePickingValues() {}
+#define gl_VertexIndex 0
+#define gl_InstanceIndex 0
 """
 
 COMPUTE_2D = COMMON + """layout(rgba32f) uniform image2D mTDComputeOutputs[TD_NUM_COLOR_BUFFERS];
@@ -92,6 +106,8 @@ def expand(src: str, seen: set[Path]) -> str:
 
 
 def stage_of(src: str) -> tuple[str, str]:
+    if "// td: stage vertex" in src:
+        return "vert", VERTEX
     if "local_size_x" not in src:
         return "frag", PIXEL
     z = re.search(r"local_size_z\s*=\s*(\d+)", src)

@@ -155,3 +155,27 @@ def test_clear_cache_without_manifest(tmp_path):
     assert not list((tmp_path / "vel").glob("*.exr"))
     assert not (tmp_path / "scalars").exists()
     assert cache.clear_cache(tmp_path / "missing") == 0
+
+
+def test_group_cache_paths_resume_and_staleness(tmp_path):
+    members = {
+        "fluid2d": {"params": {"drag": 1}, "fields": {"vel": "rg32float"}, "res": [8, 8], "bounds": [0, 0, 1, 1], "extra": {}},
+        "particles": {"params": {"drag": 2}, "fields": {"pos": "rgba32float"}, "res": [4, 4], "bounds": [0, 0, 1, 1], "extra": {}},
+    }
+    params = {name: info["params"] for name, info in members.items()}
+    m = make_manifest(sim="group", params=params, fields={}, members=members, frame_end=2)
+    assert cache.frame_path(tmp_path, "vel", 1, "fluid2d") == tmp_path / "fluid2d" / "vel" / "vel.00001.exr"
+    cache.write_manifest(tmp_path, m)
+    for sim, info in members.items():
+        for frame in (1, 2):
+            for name in info["fields"]:
+                path = cache.frame_path(tmp_path, name, frame, sim)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"a")
+    assert cache.resume_frame(tmp_path, m) == 3
+    assert cache.cache_status(tmp_path, params) == cache.COMPLETE
+    changed = {"fluid2d": params["fluid2d"], "particles": {"drag": 9}}
+    assert cache.cache_status(tmp_path, changed) == cache.STALE
+    assert cache.clear_cache(tmp_path, m) >= 5
+    assert not (tmp_path / "fluid2d").exists()
+    assert cache.read_manifest(tmp_path) is None

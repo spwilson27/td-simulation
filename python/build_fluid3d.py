@@ -226,6 +226,7 @@ def build_fluid3d(sims, bn):
     for i, (field, fmt) in enumerate(STATE_FIELDS()):
         zero = glsl3d(bn, f, "zero_" + field, f.op("zero_src"), [], fmt, col=0, row=4 + i)
         load = bn.place(f.create(td.moviefileinTOP, "load_" + field), 1, 4 + i)
+        load.par.playmode = "locked"
         decode = glsl3d(bn, f, "decode_" + field, f.op("atlas_decode_src"), [load], fmt, uniforms=atlas_uniforms(),
                         col=2, row=4 + i, filtering="nearest", include_bus=False)
         init = bn.switch(f, "init_" + field, [zero, decode], 3, 4 + i)

@@ -7,6 +7,8 @@
       demo              publishers: emitter (sources + forces) and a moving disc obstacle
       baker             Baker (writes cache/fluid2d by default)
       cache_reader      CacheReader (plays a cache back; can be the bus field source)
+      particles         GPU particles (position/velocity textures). Not in the clock until a demo enables them.
+      demo_particles    Presets: 2D embers and 3D sparks.
 
 Every shader and extension is a Text DAT synced to its file in the repo, so edits on disk show up in TD.
 """
@@ -254,7 +256,7 @@ def build_fluid2d(sims):
     pulse_callbacks(f, {"Applypreset": "o.ApplyPreset(o.par.Preset.eval())"})
 
     src = {n: shader(f, n + "_src", f"shaders/fluid2d/{n}.glsl", -1, i + 3) for i, n in enumerate(
-        ("advect", "maccormack", "combust", "vorticity", "divergence", "jacobi", "project", "render_fire"))}
+        ("advect", "maccormack", "combust", "vorticity", "divergence", "jacobi", "project", "render_fire", "quantize"))}
     shader(f, "bus_glsl", "shaders/common/bus.glsl", -1, 2)
 
     P = "parent().par."
@@ -265,6 +267,8 @@ def build_fluid2d(sims):
         row = 4 + i
         zero = constant(f, "zero_" + field, fmt, (0, 0, 0, 0), 0, row)
         load = place(f.create(td.moviefileinTOP, "load_" + field), 1, row)
+        load.par.playmode = "locked"
+        load.par.index = 0
         init = switch(f, "init_" + field, [zero, load], 2, row)
         fb = place(f.create(td.feedbackTOP, "fb_" + field), 3, row)
         init.outputConnectors[0].connect(fb.inputConnectors[0])
@@ -288,9 +292,12 @@ def build_fluid2d(sims):
     div = glsl(f, "divergence", src["divergence"], [forces, obs, combust], "mono32float", col=9, row=0)
     jac = glsl(f, "jacobi", src["jacobi"], [pr, div, obs], "mono32float", npasses="parent().par.Jacobi", col=10, row=1)
     proj = glsl(f, "project", src["project"], [forces, jac, obs], "rg32float", [("uLimit", (P + "Maxspeed",))], 11, 0)
-    vel_state = null(f, "vel_state", proj, 12, 0)
-    sc_state = null(f, "scalars_state", combust, 12, 1)
-    pr_state = null(f, "pressure_state", jac, 12, 2)
+    qvel = glsl(f, "q_vel", src["quantize"], [proj], "rg32float", [("uStep", (1.0e5,))], 11, 3)
+    qsc = glsl(f, "q_scalars", src["quantize"], [combust], "rgba16float", [("uStep", (1.0e4,))], 11, 4)
+    qpr = glsl(f, "q_pressure", src["quantize"], [jac], "mono32float", [("uStep", (1.0e5,))], 11, 5)
+    vel_state = null(f, "vel_state", qvel, 12, 0)
+    sc_state = null(f, "scalars_state", qsc, 12, 1)
+    pr_state = null(f, "pressure_state", qpr, 12, 2)
     hold(f, "vel_out", vel_state, "rg32float", 13, 0)
     sc_out = hold(f, "scalars_out", sc_state, "rgba16float", 13, 1)
     hold(f, "pressure_out", pr_state, "mono32float", 13, 2)
@@ -329,6 +336,7 @@ def build_demo(sims):
 def build_baker(sims):
     b = place(sims.create(td.baseCOMP, "baker"), 4, 0)
     par(b, "Bake", "str", "Sim", "/sims/fluid2d")
+    par(b, "Bake", "str", "Groupsims", "", label="Group Sims")
     par(b, "Bake", "str", "Cachedir", "cache/fluid2d")
     par(b, "Bake", "int", "Framestart", 1)
     par(b, "Bake", "int", "Frameend", 120)
@@ -350,6 +358,7 @@ def build_baker(sims):
 def build_cache_reader(sims):
     r = place(sims.create(td.baseCOMP, "cache_reader"), 5, 0)
     par(r, "Cache", "str", "Cachedir", "cache/fluid2d")
+    par(r, "Cache", "str", "Member", "")
     fr = par(r, "Cache", "float", "Frame", 1.0)
     fr.expr = "op.simclock.par.Frame"
     par(r, "Cache", "toggle", "Interpolate", True)
@@ -420,6 +429,10 @@ def build(parent_path: str = "/") -> dict:
     build_fluid3d.build_bus3d(sims, me)
     build_fluid3d.build_fluid3d(sims, me)
     build_fluid3d.build_demo3d(sims, me)
+    import build_particles  # noqa: PLC0415
+    importlib.reload(build_particles)
+    build_particles.build_particles(sims, me)
+    build_particles.build_demo_particles(sims, me)
     build_baker(sims)
     build_cache_reader(sims)
     for comp in sims.children:
