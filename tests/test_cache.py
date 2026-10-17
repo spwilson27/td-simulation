@@ -85,6 +85,7 @@ def test_clear_cache_only_removes_its_files(tmp_path):
 
 def test_estimate_bytes():
     assert cache.estimate_bytes([256, 256], {"vel": "rg32float", "s": "rgba16float"}, 10) == 256 * 256 * 16 * 10
+    # 128^3 packs into a 16x8 tile grid with no padding, so the atlas is the voxel count.
     assert cache.estimate_bytes([128, 128, 128], {"d": "mono16float"}, 1) == 128 ** 3 * 2
 
 

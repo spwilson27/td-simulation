@@ -1,0 +1,158 @@
+{
+  "steps_target": 600,
+  "setup": {
+    "res": [
+      128,
+      128,
+      128
+    ],
+    "step": 0
+  },
+  "render_mid": {
+    "err": ""
+  },
+  "stability": {
+    "samples": [
+      {
+        "step": 20,
+        "speed": 1.2416304349899292,
+        "finite": true,
+        "temp": 4.1796875,
+        "smoke": 0.64111328125
+      },
+      {
+        "step": 120,
+        "speed": 3.8075311183929443,
+        "finite": true,
+        "temp": 5.23046875,
+        "smoke": 0.857421875
+      },
+      {
+        "step": 220,
+        "speed": 3.575850009918213,
+        "finite": true,
+        "temp": 3.7734375,
+        "smoke": 0.65380859375
+      },
+      {
+        "step": 320,
+        "speed": 4.2844696044921875,
+        "finite": true,
+        "temp": 4.23828125,
+        "smoke": 0.73388671875
+      },
+      {
+        "step": 420,
+        "speed": 5.994088649749756,
+        "finite": true,
+        "temp": 4.0078125,
+        "smoke": 0.68017578125
+      },
+      {
+        "step": 520,
+        "speed": 5.99876070022583,
+        "finite": true,
+        "temp": 4.2109375,
+        "smoke": 0.716796875
+      }
+    ],
+    "finite": true,
+    "max_speed": 5.99876070022583,
+    "steps": 600
+  },
+  "obstacles": {
+    "sphere": {
+      "sdf": -0.16880229115486145,
+      "smoke": 0.0,
+      "ijk": [
+        68,
+        49,
+        64
+      ]
+    },
+    "mesh": {
+      "sdf": -0.19780857861042023,
+      "smoke": 0.0,
+      "ijk": [
+        70,
+        78,
+        65
+      ]
+    },
+    "pop_triangles": 12,
+    "sop_triangles": 80,
+    "mesh_sdf_min": -0.4699999988079071
+  },
+  "render": {
+    "err": ""
+  },
+  "uncapped": {
+    "steps": 112,
+    "frames": 112,
+    "fps": 37.33
+  },
+  "capped": {
+    "steps": 105,
+    "frames": 196,
+    "fps": 65.33
+  },
+  "pressure": {
+    "jacobi12": {
+      "seconds": 0.008491500047966838,
+      "div_pre": 0.05080707371234894,
+      "div_post": 0.043490294367074966
+    },
+    "multigrid": {
+      "seconds": 0.016510625020600855,
+      "div_pre": 0.047282371670007706,
+      "div_post": 0.04109562933444977
+    }
+  },
+  "full_bake": {
+    "status": "complete: 24 frames in 5.8s",
+    "baking": false,
+    "frame": 24,
+    "pumped": 8,
+    "replay": {
+      "diff": 0.0,
+      "fields": {
+        "vel": 0.0,
+        "scalars": 0.0,
+        "pressure": 0.0
+      },
+      "frame": 24,
+      "status": "fluid3d 128x128x128 complete"
+    }
+  },
+  "replay": {
+    "diff": 0.0,
+    "fields": {
+      "vel": 0.0,
+      "scalars": 0.0,
+      "pressure": 0.0
+    },
+    "frame": 24,
+    "status": "fluid3d 128x128x128 complete"
+  },
+  "cancelled": {
+    "status": "cancelled: 16 frames in 3.4s",
+    "baking": false,
+    "frame": 16,
+    "pumped": 0,
+    "replay": null
+  },
+  "resumed": {
+    "status": "complete: 8 frames in 2.3s",
+    "baking": false,
+    "frame": 24,
+    "pumped": 8,
+    "replay": null
+  },
+  "resume_identical": {
+    "files": 72,
+    "same_names": true,
+    "mismatched": []
+  },
+  "phase1_bake_check": 0,
+  "pass": true
+}

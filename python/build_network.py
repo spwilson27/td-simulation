@@ -363,10 +363,12 @@ def build_cache_reader(sims):
     shader(r, "bus_glsl", "shaders/common/bus.glsl", -1, 2)
     scale_src = shader(r, "scale_src", "shaders/common/scale.glsl", -1, 3)
     render_src = shader(r, "render_src", "shaders/fluid2d/render_fire.glsl", -1, 4)
+    shader(r, "atlas_decode_src", "shaders/common/atlas_decode.glsl", -1, 5)
     for i, field in enumerate(("vel", "scalars", "pressure")):
         ab = []
         for j, which in enumerate("ab"):
             m = place(r.create(td.moviefileinTOP, f"{field}_{which}"), 0, i * 2 + j)
+            m.par.playmode = "locked"  # use Path() exactly; Index me.time.frame would rewrite the frame number
             m.par.file.expr = f"parent().ext.CacheReader.Path({field!r}, {j})"
             ab.append(m)
         x = place(r.create(td.crossTOP, f"{field}_x"), 1, i * 2)
@@ -410,6 +412,14 @@ def build(parent_path: str = "/") -> dict:
     build_bus(sims)
     build_fluid2d(sims)
     build_demo(sims)
+    import build_fluid3d  # noqa: PLC0415
+    import importlib  # noqa: PLC0415
+    import inspect  # noqa: PLC0415
+    importlib.reload(build_fluid3d)
+    me = sys.modules.get(__name__) or inspect.getmodule(build)
+    build_fluid3d.build_bus3d(sims, me)
+    build_fluid3d.build_fluid3d(sims, me)
+    build_fluid3d.build_demo3d(sims, me)
     build_baker(sims)
     build_cache_reader(sims)
     for comp in sims.children:
@@ -423,3 +433,11 @@ def register_demo() -> None:
     bus.Publish("sources", "/sims/demo/emitter_sources")
     bus.Publish("forces", "/sims/demo/emitter_forces")
     bus.Publish("obstacles", "/sims/demo/disc")
+    bus3 = td.op.simbus3d
+    bus3.Publish("sources", "/sims/demo3d/emitter_sources")
+    bus3.Publish("forces", "/sims/demo3d/emitter_forces")
+    bus3.Publish("obstacles", "/sims/demo3d/sphere")
+    bus3.Publish("obstacles", "/sims/demo3d/box")
+    bus3.Publish("obstacles", "/sims/demo3d/capsule")
+    bus3.Publish("obstacles", "/sims/demo3d/mesh")
+    td.op("/sims/demo3d").RebuildMesh()

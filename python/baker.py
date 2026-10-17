@@ -60,11 +60,18 @@ class Baker:
     def NewManifest(self):
         sim, p = self.Sim, self.ownerComp.par
         bus, clock = op.simbus.ext.FieldBus, op.simclock  # noqa: F821
+        params = sim.Params()
+        # A sim reports its own grid. fluid3d's is the 3D bus; fluid2d's matches the 2D bus.
+        res = list(params.get("res", list(bus.Res)))
+        bounds = list(params.get("bounds", list(bus.Bounds)))
+        extra = {}
+        if len(res) >= 3:
+            extra["atlas"] = self.cache.atlas_layout(res[:3])
         return self.cache.Manifest(
-            sim=sim.name, params=sim.Params(), fields=sim.StateFormats(), res=list(bus.Res), bounds=list(bus.Bounds),
+            sim=sim.name, params=params, fields=sim.StateFormats(), res=res, bounds=bounds,
             fps=clock.par.Fps.eval(), substeps=int(clock.par.Substeps.eval()),
             frame_start=int(p.Framestart.eval()), frame_end=int(p.Frameend.eval()),
-            td_version=f"{app.version}.{app.build}",  # noqa: F821
+            td_version=f"{app.version}.{app.build}", extra=extra,  # noqa: F821
         )
 
     def CacheStatus(self) -> str:

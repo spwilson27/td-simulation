@@ -2,24 +2,24 @@
   "frames": 40,
   "preset": "realtime",
   "full_bake": {
-    "status": "complete: 40 frames in 5.2s",
+    "status": "complete: 40 frames in 4.7s",
     "baking": false,
     "frame": 40,
     "cache": "complete",
     "realtime": true,
-    "seconds": 5.35,
-    "fps": 7.48
+    "seconds": 4.65,
+    "fps": 8.61
   },
   "cancelled": {
-    "status": "cancelled: 22 frames in 2.4s",
+    "status": "cancelled: 23 frames in 2.3s",
     "baking": false,
-    "frame": 22,
+    "frame": 23,
     "cache": "partial",
     "realtime": true
   },
-  "resume_started": "baking frame 23 / 40",
+  "resume_started": "baking frame 24 / 40",
   "resumed": {
-    "status": "complete: 18 frames in 3.9s",
+    "status": "complete: 17 frames in 2.4s",
     "baking": false,
     "frame": 40,
     "cache": "complete",

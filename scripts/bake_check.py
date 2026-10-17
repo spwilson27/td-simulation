@@ -25,6 +25,8 @@ from td_scratch import ROOT, attach  # noqa: E402
 CONFIG = r'''
 import json
 b = op('/sims/baker')
+b.par.Sim = '/sims/fluid2d'
+op.simclock.par.Sims = '/sims/fluid2d'
 op('/sims/fluid2d').ApplyPreset({preset!r})
 b.par.Cachedir = {cache!r}
 b.par.Framestart, b.par.Frameend, b.par.Resume, b.par.Warmup = 1, {frames}, True, 0

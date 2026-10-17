@@ -65,11 +65,14 @@ flowchart TD
 | Operator | Role |
 | --- | --- |
 | `clock` | `SimClockExt`, global shortcut `op.simclock`. Ticks at frame start. |
-| `bus` | `FieldBus`, global shortcut `op.simbus`. Holds the grid, merges publishers, routes the active fluid fields. |
+| `bus` | `FieldBus`, global shortcut `op.simbus`. Holds the 2D grid, merges publishers, routes the active fluid fields. |
 | `fluid2d` | 2D smoke/fire solver. |
 | `demo` | An emitter (one sources TOP and one forces TOP) and a moving disc obstacle. |
-| `baker` | Writes `cache/fluid2d` by default. |
-| `cache_reader` | Plays a cache back. Can replace the live sim as the bus field source. |
+| `bus3d` | `FieldBus3D`, global shortcut `op.simbus3d`. The 3D grid and the same publisher kinds. |
+| `fluid3d` | 3D smoke/fire solver and volume render. |
+| `demo3d` | A 3D emitter, moving sphere / box / capsule, and a mesh obstacle. |
+| `baker` | Writes `cache/fluid2d` by default. Point `Sim` at `fluid3d` to bake the volume. |
+| `cache_reader` | Plays a cache back. 3D frames are slice atlases decoded to volumes. |
 
 Extensions are promoted onto their COMPs, so `op.simclock.Tick()` and `op.simbus.Publish(...)` call the Python methods directly. Every shader and extension is a text DAT with its file synced from this repo; edits on disk show up in the project.
 
@@ -404,15 +407,80 @@ These did not:
 - Float image atomics. `GL_EXT_shader_atomic_float` is not supported on this GPU, so a FLIP particle-to-grid scatter cannot atomic-add into a texture. Particle-to-grid will be a gather over binned particles.
 - Movie File In on EXRs only a few rows tall. 64×32 and 256×8 failed to open. 96×96 and larger loaded.
 
+## 3D smoke and fire
+
+`/sims/bus3d` (`op.simbus3d`) is a second bus. The 2D bus is unchanged. Publishers use the same `Publish(kind, top)` table and merge TOPs; the merges are compute shaders writing `texture3d`. World axes are the same (+y up) with a z extent. Default bounds are (−1, 0, −1) to (1, 2, 1), so a cubic grid has cubic cells. Default resolution is 128³. Open sides are still an absorbing band; the pressure solve treats every face as a wall. Front and back (`Wallfront`, `Wallback`) default closed, and the top defaults open.
+
+Shaders include the contract with `#include <bus3d_glsl>`.
+
+| Field | Format | Encoding |
+| --- | --- | --- |
+| `vel` | `rgba16float` | xyz velocity, world units per second. w is unused. |
+| `scalars` | `rgba16float` | Same channels as 2D: smoke, temperature, fuel, expansion. |
+| `pressure` | `mono32float` | Pressure with dt folded in. |
+| `sources` | `rgba32float` | Per-second smoke, heat, fuel, extra expansion. |
+| `forces` | `rgba32float` | xyz acceleration. |
+| `obstacles` | `rgba32float` | r signed distance (negative inside), gba obstacle velocity. |
+
+`vel` is half precision because speeds in this sim sit well inside the half range and the cache round-trip has to be bit-exact with the persistent state. Pressure stays 32-bit.
+
+A Feedback TOP does not capture a 3D target on this GPU: it passes its input through and the value does not accumulate. Each fluid field is a pair of Cache TOPs. `Step` reads one and writes the other (`Replace` on, so the single cached frame is overwritten). The public `vel_out`, `scalars_out`, and `pressure_out` are selects of the cache just written. An inactive Cache TOP keeps the 3D image, and reading it does not recook the solver.
+
+`fluid3d` has the same six methods as `fluid2d`, so the clock and the baker drive it. The clock's Sims parameter stays `/sims/fluid2d` after a build, so phase 1 keeps its timing. To run the volume:
+
+```python
+op.simclock.par.Sims = "/sims/fluid3d"
+op("/sims/fluid3d").ApplyPreset("realtime")
+```
+
+The step is RK2 semi-Lagrangian advection, optional MacCormack, combustion, buoyancy and vorticity confinement, divergence, a pressure solve, and projection. Vorticity is faded within a couple of cells of a solid; the obstacle surface is a one-cell vortex sheet and confinement there runs away.
+
+### Pressure
+
+`Solver` is `jacobi` or `multigrid`. Jacobi is one compute TOP, `Jacobi` passes, the same compact 7-point stencil as the 2D solver extended by z. The realtime preset uses it: on this collocated grid it stays stable.
+
+Multigrid is a V-cycle on four levels (N, N/2, N/4, N/8). Smoothing is red-black Gauss-Seidel (one color per pass, `Smooth` passes before restriction and again after prolongation). The coarsest level runs `Coarse` iterations. The coarse correction is added with `Coarsegain`. A gain of 1 overshoots: the prolongation injects a high-frequency error that the following sweeps do not fully remove, and the velocity diverges. A gain around 0.05 is the stable setting. It is a real V-cycle, and on a short run it can cut divergence about as well as a similar Jacobi count; it does not replace Jacobi for the long realtime preset. `Vcycles` 2 runs a second cycle (`b_*` TOPs). Those stay bypassed when the count is 1.
+
+### Obstacles
+
+`demo3d` publishes four obstacle fields:
+
+- Analytic sphere, box, and capsule. Each has a centre (or axis), a radius, and a velocity. The demo moves them with a sine so the velocity matches the derivative.
+- A mesh. `RebuildMesh` reads a SOP, or a POP through `poptoSOP`, fan-triangulates it, and jump-floods a signed distance in the mesh's local bounds. The flood is one compute TOP: clear, a single thread rasterises the triangles into a surface band, then log₂(N) jump steps. The result is snapshotted into `sdf_hold`. Every frame the publisher only transforms that volume (translation, yaw, scale) and writes distance plus rigid velocity. A moving mesh stays cheap. `Triangles(geo)` is the same conversion and is what the phase 2 check uses for both the sphere SOP and the box POP.
+
+Inside an obstacle the solver writes the obstacle velocity and clears the scalars, same as 2D.
+
+### Volume render
+
+`render_out` is a raymarched GLSL TOP. Default camera is an orbit (`Camaz`, `Camel`, `Camdist`, `Camfov`) around `Target`. Smoke absorbs, temperature emits through the same blackbody ramp as 2D, and a shadow volume marched along `Light` multiplies the emission. Obstacle surfaces are shaded with the SDF gradient. Output size is `Renderw` × `Renderh` (default 1280×720). The march uses `Raysteps`, capped at 56 so the loop has a fixed bound (variable bounds were much slower on this GPU). The shadow march is 8 steps.
+
+### 3D caches
+
+State is not saved as a 3D EXR. `fluid3d` encodes each volume to a 2D slice atlas (`vel_atlas`, and the same for scalars and pressure) and those are what the baker writes. `cache.atlas_layout` picks the tile grid. 128³ packs as 8×16 tiles, 1024×2048, which is exactly the voxel count. Both atlas edges are padded out to at least 256 pixels: Movie File In on this machine opens rgba16float EXRs at 256×256 and fails at 256×128 and 128×128. `estimate_bytes` uses the atlas pixel count, so a padded volume is larger than `width * height * depth`.
+
+The manifest's `res` is `[width, height, depth]` and `extra.atlas` stores the layout the file was written with. `CacheReader.Reload` builds a decode compute TOP per field (`{field}_vol`). `Output(field)` returns that volume for a 3D manifest and the usual `{field}_out` for a 2D one. The 2D reader wiring is unchanged. Movie File In is created with `playmode` locked so its default index expression cannot rewrite the frame number in the filename.
+
+`cache/phase2_full` is the validation bake. A 24-frame realtime bake is the showcase; delete it when `cache/` would pass 30 GB.
+
+### 3D presets
+
+`ApplyPreset` sets the cubic resolution, the multigrid iteration counts, the ray budget, and Jacobi. Preview and realtime leave `Solver` on Jacobi. Bake selects multigrid. Substeps stay 1, so applying a 3D preset does not change the 2D timestep the way the 2D bake preset does.
+
+| Preset | Grid | Jacobi | Smooth | Coarse | V-cycles |
+| --- | --- | --- | --- | --- | --- |
+| preview | 96³ | 12 | 6 | 16 | 1 |
+| realtime | 128³ | 16 | 8 | 20 | 1 |
+| bake | 192³ | 24 | 12 | 32 | 2 |
+
 ## Known limitations
 
 **Open sides are an absorbing band.** The pressure solve treats every domain edge as a wall, including sides marked open. An open side adds extra decay, across `Spongewidth`, to the advected velocity and scalars. Leaving the pressure at 0 outside the domain went unstable on this collocated grid as soon as the plume reached the edge.
 
-**The pressure solver is Jacobi with a fixed iteration count.** It is not a multigrid solve. The residual at high resolution is whatever `Jacobi` iterations can remove from a warm start. The bake preset uses 80 iterations; the realtime preset uses 30.
+**The 2D pressure solver is Jacobi with a fixed iteration count.** The 2D residual at high resolution is whatever `Jacobi` iterations can remove from a warm start. The 2D bake preset uses 80 iterations; the realtime preset uses 30. The 3D solver can run a damped multigrid V-cycle; see the 3D pressure section. Full-gain prolongation is unstable on this collocated grid.
 
 **Bakes run offline.** The real-time flag stays off until the bake finishes or is cancelled, and each saved frame is a full set of EXRs. How fast that goes is in the benchmark reports below, not a fixed property of the solver.
 
-**Short EXRs do not play back.** The cache reader uses Movie File In. Grids only a few rows tall fail to open (seen at 64×32 and 256×8). 96×96 and up are fine. Saving those EXRs from a GLSL TOP still works; the failure is on the way back in.
+**Short EXRs do not play back.** The cache reader uses Movie File In. Grids only a few rows tall fail to open (seen at 64×32 and 256×8). For rgba32float, 96×96 and up are fine. rgba16float is stricter on this machine: 128×128 and 256×128 failed, 256×256 and up loaded. 3D atlases are padded so both edges are at least 256. Saving those EXRs from a GLSL TOP still works; the failure is on the way back in.
 
 **Root defaults to `project.folder`.** That is correct when `sims.toe` lives in this repo. A project whose folder is somewhere else will sync shaders, extensions, and relative cache paths against that other folder.
 
@@ -442,3 +510,17 @@ Uncapped means `project.realTime` off for about 3 seconds. Preview and realtime 
 `bake_check.py --frames 40` on the realtime preset: 40 frames in 5.35 s (7.48 fps), 120 EXRs, 214,095,940 bytes. Cancel and resume were byte-identical. Replaying the last frame through the cache reader matched the live render (max abs diff 0). A half frame differed from the average of its neighbours by 8.54e-4.
 
 The bake preset (2048, 4 substeps, 80 Jacobi), frames 1–60 into `cache/fluid2d_bake`: 36.7 s, 1.63 fps, 180 EXRs, 2,439,256,927 bytes. `reports/frame_bake.png` is the last frame.
+
+### 3D
+
+`scripts/validate_phase2.py` (exit 0, `reports/phase2.json`). `reports/phase2_fire.png` is step 200, when the plume is up around the obstacles. `reports/phase2_late.png` is step 600.
+
+600 steps at 128³ stayed finite. Speed touched the clamp of 6 and ended at 2.63. Temperature stayed between about 3.5 and 5.3. The moving sphere and the mesh were negative inside (signed distance −0.169 and −0.198) and smoke in those cells was 0. A box POP converted to 12 triangles; the sphere SOP to 80.
+
+Uncapped (`project.realTime` off, volume render cooking): the realtime preset (128³, Jacobi 16, 48 ray steps, 1280×720) completed 244 frames in 3 s, 81 fps. The validation gate used Jacobi 12 and measured 85 fps uncapped and 62 fps with real-time on. An isolated `Tick()` returns in about a millisecond because the GPU work is queued; the timeline rate is the one that waits for it.
+
+A 6-step sample from a fresh reset: Jacobi (12 passes) took divergence RMS from 1.146 to 1.081 (×1.06). The damped multigrid (`Coarsegain` 0.05) took it from 0.990 to 0.881, below the Jacobi result. The wall-clock numbers from that tight loop are a few milliseconds and are not the GPU time. Full-gain prolongation is unstable; see the 3D pressure section.
+
+A 24-frame bake finished in 4.0 s (72 EXRs, 226 MB under `cache/phase2_full`). Cancel and resume were byte-identical. Replaying the last frame through the cache reader matched the live velocity, scalars, and pressure (max abs diff 0), read in the same script as the tick that saved the frame.
+
+`scripts/bake_check.py --frames 40` during that run: 40 frames in 3.39 s (11.81 fps), 120 EXRs, resume byte-identical, live render and scalars matched the cache (diff 0). The baker’s `Sim` parameter has to point at `fluid2d` for that check; the script sets it.

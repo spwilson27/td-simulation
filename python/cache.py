@@ -23,6 +23,10 @@ from pathlib import Path
 CACHE_VERSION = 1
 MANIFEST_NAME = "manifest.json"
 
+# Movie File In on this machine fails to open rgba16float EXRs when either edge is 128 or smaller
+# (256x128 failed, 256x256 and up loaded). 3D atlases are padded out to this edge.
+MIN_ATLAS_EDGE = 256
+
 BYTES_PER_PIXEL = {
     "rgba32float": 16, "rgba16float": 8, "rg32float": 8, "rg16float": 4,
     "mono32float": 4, "mono16float": 2, "rgba8fixed": 4,
@@ -245,10 +249,74 @@ def clear_cache(cache_dir, manifest: Manifest | None = None) -> int:
     return removed
 
 
+def atlas_layout(res) -> dict:
+    """Slice-atlas layout for a 3D volume stored as one 2D EXR.
+
+    Slices are tiles of `volume[0]` by `volume[1]`. `cols * rows` is at least the depth, and both atlas
+    edges are at least MIN_ATLAS_EDGE so a half-float EXR will open in Movie File In. Empty tiles (the
+    padding past `depth`) are unused. The result is deterministic for a given resolution.
+    """
+    if len(res) < 3:
+        raise ValueError("atlas_layout expects a 3D resolution")
+    w, h, d = (max(1, int(res[0])), max(1, int(res[1])), max(1, int(res[2])))
+    best = None
+    for cols in range(1, d + 1):
+        rows = math.ceil(d / cols)
+        pc, pr = cols, rows
+        while pc * w < MIN_ATLAS_EDGE:
+            pc += 1
+        while pr * h < MIN_ATLAS_EDGE:
+            pr += 1
+        waste = pc * pr - d
+        aw, ah = pc * w, pr * h
+        score = (waste, abs(aw - ah), aw * ah, pc)
+        if best is None or score < best[0]:
+            best = (score, pc, pr, aw, ah)
+    _, cols, rows, aw, ah = best
+    return {"cols": cols, "rows": rows, "width": aw, "height": ah, "volume": [w, h, d]}
+
+
+def atlas_pixel(x: int, y: int, z: int, layout: dict) -> tuple[int, int]:
+    """Volume voxel -> atlas pixel. `layout` is an atlas_layout dict."""
+    w, h, d = layout["volume"]
+    cols = int(layout["cols"])
+    x, y, z = int(x), int(y), int(z)
+    if not (0 <= x < w and 0 <= y < h and 0 <= z < d):
+        raise ValueError(f"voxel {(x, y, z)} outside volume {layout['volume']}")
+    return (z % cols) * w + x, (z // cols) * h + y
+
+
+def atlas_voxel(px: int, py: int, layout: dict) -> tuple[int, int, int] | None:
+    """Atlas pixel -> volume voxel, or None when the pixel is padding past the depth."""
+    w, h, d = layout["volume"]
+    cols = int(layout["cols"])
+    px, py = int(px), int(py)
+    if not (0 <= px < int(layout["width"]) and 0 <= py < int(layout["height"])):
+        return None
+    tx, x = divmod(px, w)
+    ty, y = divmod(py, h)
+    z = ty * cols + tx
+    if z >= d or tx >= cols or ty >= int(layout["rows"]):
+        return None
+    return x, y, z
+
+
+def stored_pixels(res) -> int:
+    """Pixels actually written per frame. 3D fields are slice atlases, which can be larger than the voxel count."""
+    dims = [int(r) for r in res]
+    if len(dims) >= 3:
+        layout = atlas_layout(dims[:3])
+        return int(layout["width"]) * int(layout["height"])
+    return math.prod(dims)
+
+
 def estimate_bytes(res, fields: dict, frames: int) -> int:
-    """Uncompressed upper bound; EXR zip usually lands at 30-70% of this for smoke."""
-    pixels = math.prod(int(r) for r in res)
-    return pixels * sum(BYTES_PER_PIXEL.get(fmt, 16) for fmt in fields.values()) * int(frames)
+    """Uncompressed upper bound; EXR zip usually lands at 30-70% of this for smoke.
+
+    A 3D `res` is stored as a 2D slice atlas (see atlas_layout), so the bound uses the atlas pixel count.
+    When the slice grid is exact and no edge padding is required, that equals the voxel count.
+    """
+    return stored_pixels(res) * sum(BYTES_PER_PIXEL.get(fmt, 16) for fmt in fields.values()) * int(frames)
 
 
 def blend_frames(t: float, frame_start: int, frame_end: int) -> tuple[int, int, float]:

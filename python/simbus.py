@@ -64,6 +64,21 @@ def uv_to_world(uv, bounds):
     return x0 + uv[0] * (x1 - x0), y0 + uv[1] * (y1 - y0)
 
 
+def cell_size_3d(bounds, res) -> tuple[float, float, float]:
+    x0, y0, z0, x1, y1, z1 = bounds
+    return (x1 - x0) / res[0], (y1 - y0) / res[1], (z1 - z0) / res[2]
+
+
+def world_to_uv_3d(p, bounds):
+    x0, y0, z0, x1, y1, z1 = bounds
+    return (p[0] - x0) / (x1 - x0), (p[1] - y0) / (y1 - y0), (p[2] - z0) / (z1 - z0)
+
+
+def uv_to_world_3d(uv, bounds):
+    x0, y0, z0, x1, y1, z1 = bounds
+    return x0 + uv[0] * (x1 - x0), y0 + uv[1] * (y1 - y0), z0 + uv[2] * (z1 - z0)
+
+
 class FieldBus:
     """Extension for the bus COMP. Custom parameters: Resw, Resh, Boundsx0, Boundsy0, Boundsx1, Boundsy1,
     Fieldsource (COMP providing vel/scalars/pressure: a live sim or a CacheReader)."""
@@ -178,3 +193,38 @@ class FieldBus:
             "owner_pars": cache.custom_par_identity(pars),
             "shader": hashlib.sha256(shader.encode("utf-8")).hexdigest()[:16],
         }
+
+
+class FieldBus3D(FieldBus):
+    """3D field bus. Same publisher table and merge mechanism as FieldBus, cubic grid, six world bounds.
+
+    Obstacle encoding differs: rgba is (signed distance, velocity xyz). Velocity fields are rgba xyz.
+    Global shortcut `op.simbus3d`. The 2D bus is a separate COMP and is left alone.
+    """
+
+    def __init__(self, ownerComp):
+        super().__init__(ownerComp)
+
+    @property
+    def Bounds(self):
+        p = self.ownerComp.par
+        return (p.Boundsx0.eval(), p.Boundsy0.eval(), p.Boundsz0.eval(),
+                p.Boundsx1.eval(), p.Boundsy1.eval(), p.Boundsz1.eval())
+
+    @property
+    def Res(self):
+        p = self.ownerComp.par
+        return (int(p.Resw.eval()), int(p.Resh.eval()), int(p.Resd.eval()))
+
+    @property
+    def Cell(self):
+        return cell_size_3d(self.Bounds, self.Res)
+
+    def SetGrid(self, width: int, bounds=None) -> None:
+        p = self.ownerComp.par
+        if bounds is not None:
+            p.Boundsx0, p.Boundsy0, p.Boundsz0, p.Boundsx1, p.Boundsy1, p.Boundsz1 = bounds
+        n = int(width)
+        p.Resw = n
+        p.Resh = n
+        p.Resd = n

@@ -49,7 +49,16 @@ class CacheReader:
         last = self.cache.resume_frame(self.CacheDir, m) - 1
         p.Framestart, p.Frameend = m.frame_start, max(m.frame_start, last)
         state = "complete" if m.complete else f"partial ({last - m.frame_start + 1} of {m.frame_count} frames)"
-        p.Status = f"{m.sim} {m.res[0]}x{m.res[1]} {state}"
+        if len(m.res) >= 3:
+            dims = f"{m.res[0]}x{m.res[1]}x{m.res[2]}"
+        else:
+            dims = f"{m.res[0]}x{m.res[1]}"
+        p.Status = f"{m.sim} {dims} {state}"
+        for field in m.fields:
+            self._ensure_field(field)
+            if len(m.res) >= 3:
+                layout = (m.extra or {}).get("atlas") or self.cache.atlas_layout(m.res[:3])
+                self._ensure_volume(field, layout, m.fields[field])
 
     def _blend(self):
         p = self.ownerComp.par
@@ -66,9 +75,68 @@ class CacheReader:
             return 0.0
         return self._blend()[2]
 
+    def Output(self, field: str):
+        """Decoded volume when the manifest is 3D, otherwise the 2D (or atlas) `{field}_out`."""
+        if self.manifest is not None and len(self.manifest.res) >= 3:
+            vol = self.ownerComp.op(field + "_vol")
+            if vol is not None:
+                return vol
+        return self.ownerComp.op(field + "_out")
+
+    def _ensure_field(self, field: str) -> None:
+        if self.ownerComp.op(field + "_a") is not None:
+            return
+        comp = self.ownerComp
+        movies = []
+        for which in (0, 1):
+            movie = comp.create(moviefileinTOP, f"{field}_{'ab'[which]}")
+            movie.par.playmode = "locked"
+            movie.par.file.expr = f"parent().ext.CacheReader.Path({field!r}, {which})"
+            movies.append(movie)
+        cross = comp.create(crossTOP, field + "_x")
+        movies[0].outputConnectors[0].connect(cross.inputConnectors[0])
+        movies[1].outputConnectors[0].connect(cross.inputConnectors[1])
+        cross.par.cross.expr = "parent().ext.CacheReader.Weight()"
+        out = comp.create(nullTOP, field + "_out")
+        cross.outputConnectors[0].connect(out.inputConnectors[0])
+
+    def _ensure_volume(self, field: str, layout: dict, fmt: str):
+        comp = self.ownerComp
+        name = field + "_vol"
+        top = comp.op(name)
+        if top is None:
+            top = comp.create(glslTOP, name)
+            top.par.mode = "compute"
+            top.par.computedat = comp.op("atlas_decode_src")
+            top.par.glslversion = "glsl460"
+            top.par.type = "texture3d"
+            top.par.depth = "custom"
+            top.par.outputresolution = "custom"
+            top.par.inputfiltertype = "nearest"
+            top.par.filtertype = "nearest"
+            top.par.outputaccess = "writeonly"
+            cross = comp.op(field + "_x")
+            cross.outputConnectors[0].connect(top.inputConnectors[0])
+            top.seq.vec.numBlocks = 2
+            top.par.vec0name = "uAtlas"
+            top.par.vec1name = "uAtlas2"
+        vol = layout["volume"]
+        top.par.format = fmt
+        top.par.resolutionw = int(vol[0])
+        top.par.resolutionh = int(vol[1])
+        top.par.customdepth = int(vol[2])
+        top.par.vec0valuex = int(layout["cols"])
+        top.par.vec0valuey = int(layout["rows"])
+        top.par.vec0valuez = int(vol[0])
+        top.par.vec0valuew = int(vol[1])
+        top.par.vec1valuex = int(vol[2])
+        return top
+
     def Load(self, frame: float) -> None:
         """Jump to a frame and load it now (Movie File In otherwise loads on its next cook)."""
         self.ownerComp.par.Frame = frame
         for field in self.manifest.fields if self.manifest else ():
-            for name in (f"{field}_a", f"{field}_b", f"{field}_x", f"{field}_out"):
-                self.ownerComp.op(name).cook(force=True)
+            for name in (f"{field}_a", f"{field}_b", f"{field}_x", f"{field}_out", f"{field}_vol"):
+                top = self.ownerComp.op(name)
+                if top is not None:
+                    top.cook(force=True)

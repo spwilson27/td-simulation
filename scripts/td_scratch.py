@@ -99,7 +99,9 @@ class ScratchTD:
         return res.get("result")
 
     def run_json(self, code: str, timeout: float = 60):
-        """Execute code that prints `@@JSON@@<json>` as its last marker line; returns the decoded value."""
+        """Execute code that prints `@@JSON@@<json>` as its last marker line; returns the decoded value.
+        `json` is imported for the code."""
+        code = "import json\n" + code
         res = self.call("execute_python", {"code": code, "timeout": timeout}, timeout=timeout)
         out = res.get("stdout") or ""
         if not res.get("ok"):

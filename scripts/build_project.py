@@ -40,14 +40,16 @@ if path not in sys.path:
     sys.path.insert(0, path)
 spec = importlib.util.spec_from_file_location('build_network', path + '/build_network.py')
 m = importlib.util.module_from_spec(spec)
+sys.modules['build_network'] = m
 spec.loader.exec_module(m)
 print('@@JSON@@' + json.dumps(m.build('/')))
 '''
 
 CONFIGURE = r'''
-import importlib.util, json
+import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location('build_network', {root!r} + '/python/build_network.py')
 m = importlib.util.module_from_spec(spec)
+sys.modules['build_network'] = m
 spec.loader.exec_module(m)
 m.register_demo()
 op('/sims/fluid2d').ApplyPreset('realtime')
@@ -66,12 +68,20 @@ print('@@JSON@@' + json.dumps('ok'))
 def build(td, save: bool) -> int:
     toe = str(ROOT / "sims.toe")
     print("project:", td.run_json(SAVE_PROJECT.format(toe=toe)))
-    print("built:", td.run_json(BUILD.format(root=str(ROOT)), timeout=120))
+    print("built:", td.run_json(BUILD.format(root=str(ROOT)), timeout=180))
     time.sleep(1.0)   # let extensions initialise and synced DATs load
-    print("configured:", td.run_json(CONFIGURE.format(root=str(ROOT))))
+    print("configured:", td.run_json(CONFIGURE.format(root=str(ROOT)), timeout=180))
     time.sleep(1.0)
     errs = td.call("operator_errors", {"path": "/sims", "max_depth": 6, "limit": 50})
-    problems = errs.get("operators") or errs.get("results") or []
+    def text(v):  # td-mcp may return a message as a list of single characters
+        return "".join(v) if isinstance(v, list) and all(isinstance(c, str) and len(c) <= 1 for c in v) else v
+
+    problems, warned = [], []
+    for item in errs.get("operators") or errs.get("results") or []:
+        item = {k: text(v) for k, v in item.items()}
+        (problems if item.get("errors") else warned).append(item)
+    if warned:
+        print("operator warnings (not fatal):\n" + json.dumps(warned, indent=1)[:6000])
     if problems:
         print("operator errors:\n" + json.dumps(problems, indent=1)[:6000])
     if save:

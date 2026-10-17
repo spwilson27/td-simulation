@@ -26,6 +26,14 @@ def test_state_fields_have_formats():
     assert set(simbus.STATE_FIELDS) <= set(simbus.FIELDS)
 
 
+def test_grid_helpers_3d():
+    bounds = (-1.0, 0.0, -1.0, 1.0, 2.0, 1.0)
+    assert simbus.cell_size_3d(bounds, (128, 128, 128)) == (2 / 128, 2 / 128, 2 / 128)
+    uv = simbus.world_to_uv_3d((0.0, 1.0, 0.0), bounds)
+    assert uv == (0.5, 0.5, 0.5)
+    assert simbus.uv_to_world_3d(uv, bounds) == (0.0, 1.0, 0.0)
+
+
 class _Cell:
     def __init__(self, table, row, col):
         self._table = table
