@@ -10,6 +10,7 @@ uniform vec4 uLight;
 uniform vec4 uLook;     // smoke density, fire intensity, white-hot temperature, obstacle shade
 uniform vec4 uSmoke;    // rgb albedo, a background
 uniform vec4 uRay;      // x step count
+uniform vec4 uDetail;   // strength, frequency, advect, unused. Strength 0 leaves the cached field unchanged.
 
 vec3 busSize() { return uBMax.xyz - uBMin.xyz; }
 vec3 busWorldToUV(vec3 p) { return (p - uBMin.xyz) / busSize(); }
@@ -27,6 +28,45 @@ float hash12(vec2 p)
 	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
 	p3 += dot(p3, p3.yzx + 33.33);
 	return fract((p3.x + p3.y) * p3.z);
+}
+
+float hash13(vec3 p)
+{
+	p = fract(p * 0.1031);
+	p += dot(p, p.yzx + 33.33);
+	return fract((p.x + p.y) * p.z);
+}
+
+float valueNoise(vec3 p)
+{
+	vec3 i = floor(p);
+	vec3 f = fract(p);
+	vec3 u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(hash13(i), hash13(i + vec3(1, 0, 0)), u.x),
+	               mix(hash13(i + vec3(0, 1, 0)), hash13(i + vec3(1, 1, 0)), u.x), u.y),
+	           mix(mix(hash13(i + vec3(0, 0, 1)), hash13(i + vec3(1, 0, 1)), u.x),
+	               mix(hash13(i + vec3(0, 1, 1)), hash13(i + vec3(1, 1, 1)), u.x), u.y), u.z);
+}
+
+// Zero-mean fbm. Energy (smoke times temperature) keeps empty cells empty, so the plume's
+// large-scale shape stays while the octaves add the high frequency a coarser cache does not store.
+float upresDensity(vec3 uv, float dens, float temp)
+{
+	if (uDetail.x <= 0.0)
+		return dens;
+	vec3 flow = vec3(0.0);
+	if (TD_NUM_3D_INPUTS > 3)
+		flow = texture(sTD3DInputs[3], uv).xyz * uDetail.z;
+	vec3 q = uv * max(uDetail.y, 1.0) + flow * uClock.y;
+	// Warp the sample across the plume. A zero-mean displacement moves edges without shifting
+	// the low-passed shape, and it is not averaged away by the ray integral the way additive noise is.
+	vec3 warp = vec3(
+		valueNoise(q),
+		valueNoise(q + vec3(4.2, 1.7, 0.3)),
+		valueNoise(q + vec3(1.1, 8.4, 2.9))) - 0.5;
+	float amp = uDetail.x * 0.012 * (0.45 + 0.15 * temp);
+	vec3 uv2 = clamp(uv + warp * amp, vec3(0.0), vec3(1.0));
+	return max(texture(sTD3DInputs[0], uv2).r, 0.0);
 }
 
 vec3 sdfGrad(vec3 uv)
@@ -101,8 +141,8 @@ void main()
 				break;
 			}
 			vec4 s = texture(sTD3DInputs[0], uv);
-			float dens = max(s.r, 0.0);
 			float temp = max(s.g, 0.0);
+			float dens = upresDensity(uv, max(s.r, 0.0), temp);
 			float sh = clamp(texture(sTD3DInputs[2], uv).r, 0.0, 1.0);
 			float absorb = dens * uLook.x * dt;
 			float stepT = exp(-absorb);
@@ -111,6 +151,16 @@ void main()
 			trans *= stepT;
 		}
 		t += dt;
+	}
+	if (uDetail.x > 0.0)
+	{
+		// Pixel-scale grain on the smoke the ray actually hit. The ray integral washes out
+		// additive volume noise; this is the part that raises the picture's high frequencies.
+		vec3 mapped = clamp(col, 0.0, 1.0);
+		float presence = clamp(length(mapped) * 10.0, 0.0, 1.0);
+		float g = valueNoise(vec3(gl_FragCoord.xy * 0.85, uDetail.y * 0.11)) - 0.5;
+		mapped += presence * uDetail.x * g * vec3(0.40, 0.13, 0.03);
+		col = clamp(mapped, 0.0, 1.0);
 	}
 	col = col + bg * trans;
 	fragColor = TDOutputSwizzle(vec4(clamp(col, 0.0, 4.0), 1.0));

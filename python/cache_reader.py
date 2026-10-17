@@ -66,6 +66,19 @@ class CacheReader:
             if len(res) >= 3:
                 layout = extra.get("atlas") or self.cache.atlas_layout(res[:3])
                 self._ensure_volume(field, layout, fields[field])
+                cropping = self._crop_active() and field in self._crop_fields()
+                vol = self.ownerComp.op(field + "_vol")
+                if cropping:
+                    self._ensure_crop(field, res, fields[field])
+                    if vol is not None:
+                        vol.bypass = True
+                elif vol is not None:
+                    vol.bypass = False
+            if not (self._crop_active() and field in self._crop_fields()):
+                for tag in "ab":
+                    movie = self.ownerComp.op(f"{field}_{tag}")
+                    if movie is not None and str(movie.par.outputresolution.eval()) == "custom":
+                        movie.par.outputresolution = "native"
 
     def _blend(self):
         p = self.ownerComp.par
@@ -94,7 +107,9 @@ class CacheReader:
         if field not in fields:
             return ""
         a, b, _ = self._blend()
-        return str(self.cache.frame_path(self.CacheDir, field, b if which else a, self._member()))
+        frame = b if which else a
+        frame = self.cache.resolve_frame(self.manifest, field, frame, self._member())
+        return str(self.cache.frame_path(self.CacheDir, field, frame, self._member()))
 
     def Weight(self) -> float:
         if self.manifest is None or not self.ownerComp.par.Interpolate.eval():
@@ -102,7 +117,14 @@ class CacheReader:
         return self._blend()[2]
 
     def Output(self, field: str):
-        """Decoded volume when the manifest is 3D, otherwise the 2D (or atlas) `{field}_out`."""
+        """Decoded volume when the manifest is 3D, otherwise the 2D (or atlas) `{field}_out`.
+
+        A cropped field is expanded back to the full grid. That TOP is `{field}_play`.
+        """
+        if self._crop_active() and field in self._crop_fields():
+            play = self.ownerComp.op(field + "_play")
+            if play is not None:
+                return play
         if self.manifest is not None and len(self.manifest.res) >= 3:
             vol = self.ownerComp.op(field + "_vol")
             if vol is not None:
@@ -162,8 +184,138 @@ class CacheReader:
         """Jump to a frame and load it now (Movie File In otherwise loads on its next cook)."""
         self.ownerComp.par.Frame = frame
         fields = self._active()[0] if self.manifest else {}
+        crop_fields = self._crop_fields() if self._crop_active() else set()
         for field in fields:
+            if field in crop_fields:
+                self._load_cropped(field)
+                continue
             for name in (f"{field}_a", f"{field}_b", f"{field}_x", f"{field}_out", f"{field}_vol"):
                 top = self.ownerComp.op(name)
                 if top is not None:
                     top.cook(force=True)
+
+    def _crop_active(self) -> bool:
+        storage = self.cache.storage_of(self.manifest, self._member()) if self.manifest else {}
+        if not storage.get("crop"):
+            return False
+        res = self.manifest.res
+        return len(res) >= 3
+
+    def _crop_fields(self) -> set:
+        storage = self.cache.storage_of(self.manifest, self._member()) if self.manifest else {}
+        return set(storage.get("crop_fields") or [])
+
+    def _active_res(self):
+        _fields, info = self._active()
+        return (info or {}).get("res") or self.manifest.res
+
+    def _layout_for(self, field: str, frame: int) -> tuple[dict, list]:
+        """Atlas layout and expand origin/crop size for one stored frame of `field`."""
+        resolved = self.cache.resolve_frame(self.manifest, field, frame, self._member())
+        res = [int(v) for v in self._active_res()[:3]]
+        bbox = self.cache.frame_bbox(self.manifest, resolved)
+        storage = self.cache.storage_of(self.manifest, self._member())
+        cropped = bbox is not None and field in set(storage.get("crop_fields") or []) and not self.cache.is_keyframe(
+            self.manifest, resolved, self._member())
+        if cropped:
+            shape = self.cache.bbox_shape(bbox)
+            return self.cache.atlas_layout(shape), [int(bbox[0]), int(bbox[1]), int(bbox[2]), *shape]
+        layout = (self.manifest.extra or {}).get("atlas") or self.cache.atlas_layout(res)
+        return layout, [0, 0, 0, *res]
+
+    def _ensure_crop(self, field: str, res, fmt: str) -> None:
+        comp = self.ownerComp
+        if comp.op(field + "_play") is not None:
+            return
+        vol = [int(res[0]), int(res[1]), int(res[2])]
+        decoders = []
+        for which, tag in ((0, "a"), (1, "b")):
+            dec = comp.create(glslTOP, f"{field}_dec{tag}")
+            dec.par.mode = "compute"
+            dec.par.computedat = comp.op("atlas_decode_src")
+            dec.par.glslversion = "glsl460"
+            dec.par.type = "texture3d"
+            dec.par.depth = "custom"
+            dec.par.outputresolution = "custom"
+            dec.par.format = fmt
+            dec.par.inputfiltertype = "nearest"
+            dec.par.filtertype = "nearest"
+            dec.par.outputaccess = "writeonly"
+            comp.op(f"{field}_{tag}").outputConnectors[0].connect(dec.inputConnectors[0])
+            dec.seq.vec.numBlocks = 2
+            dec.par.vec0name = "uAtlas"
+            dec.par.vec1name = "uAtlas2"
+            exp = comp.create(glslTOP, f"{field}_exp{tag}")
+            exp.par.mode = "compute"
+            exp.par.computedat = comp.op("atlas_expand_src")
+            exp.par.glslversion = "glsl460"
+            exp.par.type = "texture3d"
+            exp.par.depth = "custom"
+            exp.par.outputresolution = "custom"
+            exp.par.format = fmt
+            exp.par.resolutionw = vol[0]
+            exp.par.resolutionh = vol[1]
+            exp.par.customdepth = vol[2]
+            exp.par.inputfiltertype = "nearest"
+            exp.par.filtertype = "nearest"
+            exp.par.outputaccess = "writeonly"
+            dec.outputConnectors[0].connect(exp.inputConnectors[0])
+            exp.seq.vec.numBlocks = 2
+            exp.par.vec0name = "uOrigin"
+            exp.par.vec1name = "uCrop"
+            decoders.append((dec, exp))
+        blend = comp.create(glslTOP, field + "_play")
+        blend.par.mode = "compute"
+        blend.par.computedat = comp.op("blend3d_src")
+        blend.par.glslversion = "glsl460"
+        blend.par.type = "texture3d"
+        blend.par.depth = "custom"
+        blend.par.outputresolution = "custom"
+        blend.par.format = fmt
+        blend.par.resolutionw = vol[0]
+        blend.par.resolutionh = vol[1]
+        blend.par.customdepth = vol[2]
+        blend.par.inputfiltertype = "nearest"
+        blend.par.filtertype = "nearest"
+        blend.par.outputaccess = "writeonly"
+        decoders[0][1].outputConnectors[0].connect(blend.inputConnectors[0])
+        decoders[1][1].outputConnectors[0].connect(blend.inputConnectors[1])
+        blend.seq.vec.numBlocks = 1
+        blend.par.vec0name = "uWeight"
+
+    def _load_cropped(self, field: str) -> None:
+        a, b, weight = self._blend()
+        if not self.ownerComp.par.Interpolate.eval():
+            weight = 0.0
+        for which, frame, tag in ((0, a, "a"), (1, b, "b")):
+            layout, placed = self._layout_for(field, frame)
+            movie = self.ownerComp.op(f"{field}_{tag}")
+            movie.par.outputresolution = "custom"
+            movie.par.resolutionw = int(layout["width"])
+            movie.par.resolutionh = int(layout["height"])
+            movie.par.index = 0
+            movie.cook(force=True)
+            if hasattr(movie.par, "reload"):
+                movie.par.reload.pulse()
+                movie.cook(force=True)
+            dec = self.ownerComp.op(f"{field}_dec{tag}")
+            dec.par.resolutionw = int(placed[3])
+            dec.par.resolutionh = int(placed[4])
+            dec.par.customdepth = int(placed[5])
+            dec.par.vec0valuex = int(layout["cols"])
+            dec.par.vec0valuey = int(layout["rows"])
+            dec.par.vec0valuez = int(placed[3])
+            dec.par.vec0valuew = int(placed[4])
+            dec.par.vec1valuex = int(placed[5])
+            dec.cook(force=True)
+            exp = self.ownerComp.op(f"{field}_exp{tag}")
+            exp.par.vec0valuex = int(placed[0])
+            exp.par.vec0valuey = int(placed[1])
+            exp.par.vec0valuez = int(placed[2])
+            exp.par.vec1valuex = int(placed[3])
+            exp.par.vec1valuey = int(placed[4])
+            exp.par.vec1valuez = int(placed[5])
+            exp.cook(force=True)
+        play = self.ownerComp.op(field + "_play")
+        play.par.vec0valuex = float(weight)
+        play.cook(force=True)

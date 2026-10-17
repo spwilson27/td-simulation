@@ -27,6 +27,10 @@ for name in ('advect_vel', 'mac_vel', 'advect_scalars', 'mac_scalars', 'combust'
 op('/sims/baker').Cancel()
 op('/sims/clock/tick').par.active = False
 f.par.Cookrender = False
+f.par.Detail = 0
+# Whoever ran last may have left a 256³ bake grid or a heavy raymarch. The realtime preset
+# puts the bus back at 128³ Jacobi; the lines below keep this check's iteration count.
+f.ApplyPreset('realtime')
 f.par.Solver = 'jacobi'
 f.par.Jacobi = 12
 f.par.Velocitydecay = 0.4

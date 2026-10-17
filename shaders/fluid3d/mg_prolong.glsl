@@ -1,5 +1,6 @@
 #include <bus3d_glsl>
 // Add the trilinear coarse correction onto the finer pressure. in0 fine pressure, in1 coarse correction.
+// uScale.x is 1 for a real V-cycle. A gain near 0 leaves the smoother and does not remove smooth divergence.
 uniform vec4 uScale; // x: correction gain
 layout (local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 void main()

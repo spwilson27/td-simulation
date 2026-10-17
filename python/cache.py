@@ -127,14 +127,106 @@ def frame_path(cache_dir, field_name: str, frame: int, sim: str | None = None) -
     return root / field_name / f"{field_name}.{int(frame):05d}.exr"
 
 
-def _frame_slots(manifest: Manifest) -> list[tuple[str | None, str]]:
+def storage_of(manifest: Manifest | None, sim: str | None = None) -> dict:
+    """Bake layout options. Missing storage is the phase 1-3 layout: every frame stores every field."""
+    if manifest is None:
+        return {}
+    if sim and manifest.members:
+        extra = (manifest.members.get(sim) or {}).get("extra") or {}
+        if extra.get("storage"):
+            return dict(extra["storage"])
+    return dict((manifest.extra or {}).get("storage") or {})
+
+
+def is_keyframe(manifest: Manifest, frame: int, sim: str | None = None) -> bool:
+    """True when this frame stores a full resume state. Interval 0 or 1 keeps every frame."""
+    interval = int(storage_of(manifest, sim).get("keyframe_interval") or 0)
+    if interval <= 1:
+        return True
+    return (int(frame) - int(manifest.frame_start)) % interval == 0
+
+
+def fields_for_frame(manifest: Manifest, frame: int, sim: str | None = None) -> list[str]:
+    """Field names that must be on disk for this frame."""
+    if sim and manifest.members:
+        pool = list(manifest.members[sim]["fields"])
+    else:
+        pool = list(manifest.fields)
+    storage = storage_of(manifest, sim)
+    if is_keyframe(manifest, frame, sim):
+        names = storage.get("keyframe_fields") or pool
+    else:
+        names = storage.get("playback_fields") or pool
+    return [name for name in names if name in pool]
+
+
+def resolve_frame(manifest: Manifest, field: str, frame: int, sim: str | None = None) -> int:
+    """Latest frame at or before `frame` that actually stores `field` (a keyframe, when playback omits it)."""
+    frame = int(frame)
+    start = int(manifest.frame_start)
+    cursor = frame
+    while cursor >= start:
+        if field in fields_for_frame(manifest, cursor, sim):
+            return cursor
+        cursor -= 1
+    return frame
+
+
+def resume_state_frame(manifest: Manifest, frame: int, sim: str | None = None) -> int | None:
+    """Frame to load before simulating `frame`.
+
+    That is the latest keyframe at or before `frame - 1`. None means the resume is the first frame and the
+    caller loads zeros. When every frame is a keyframe this is `frame - 1`, the same resume the phase 1 baker uses.
+    """
+    prev = int(frame) - 1
+    if prev < int(manifest.frame_start):
+        return None
+    cursor = prev
+    while cursor > int(manifest.frame_start) and not is_keyframe(manifest, cursor, sim):
+        cursor -= 1
+    return cursor
+
+
+def frame_bbox(manifest: Manifest, frame: int) -> list | None:
+    boxes = (manifest.extra or {}).get("bboxes") or {}
+    box = boxes.get(str(int(frame)))
+    return list(box) if box is not None else None
+
+
+def bbox_shape(bbox: list) -> list[int]:
+    """Inclusive voxel box [x0, y0, z0, x1, y1, z1] -> [width, height, depth]."""
+    return [int(bbox[3]) - int(bbox[0]) + 1, int(bbox[4]) - int(bbox[1]) + 1, int(bbox[5]) - int(bbox[2]) + 1]
+
+
+def occupied_bbox(points, res, pad: int = 0) -> list[int]:
+    """Inclusive voxel box around `(x, y, z)` points, padded and clamped to `res` = [w, h, d].
+
+    An empty point list is the full domain, so a frame with no smoke still has a well-defined atlas.
+    """
+    w, h, d = (int(res[0]), int(res[1]), int(res[2]))
+    pad = int(pad)
+    if not points:
+        return [0, 0, 0, w - 1, h - 1, d - 1]
+    xs, ys, zs = zip(*((int(p[0]), int(p[1]), int(p[2])) for p in points))
+    return [
+        max(0, min(xs) - pad), max(0, min(ys) - pad), max(0, min(zs) - pad),
+        min(w - 1, max(xs) + pad), min(h - 1, max(ys) + pad), min(d - 1, max(zs) + pad),
+    ]
+
+
+def _frame_slots(manifest: Manifest, frame: int | None = None) -> list[tuple[str | None, str]]:
     if manifest.members:
-        return [(sim, name) for sim, info in manifest.members.items() for name in info["fields"]]
-    return [(None, name) for name in manifest.fields]
+        slots = []
+        for sim, info in manifest.members.items():
+            names = info["fields"] if frame is None else fields_for_frame(manifest, frame, sim)
+            slots.extend((sim, name) for name in names)
+        return slots
+    names = manifest.fields if frame is None else fields_for_frame(manifest, frame)
+    return [(None, name) for name in names]
 
 
 def frame_exists(cache_dir, manifest: Manifest, frame: int) -> bool:
-    return all(frame_path(cache_dir, name, frame, sim).is_file() for sim, name in _frame_slots(manifest))
+    return all(frame_path(cache_dir, name, frame, sim).is_file() for sim, name in _frame_slots(manifest, frame))
 
 
 def resume_frame(cache_dir, manifest: Manifest) -> int:
@@ -183,7 +275,8 @@ def custom_par_identity(pars) -> dict:
     return out
 
 
-def plan_bake(manifest: Manifest | None, params: dict, frame_start: int, frame_end: int, present: set[int]) -> dict:
+def plan_bake(manifest: Manifest | None, params: dict, frame_start: int, frame_end: int, present: set[int],
+              storage: dict | None = None) -> dict:
     """What Bake should do with an existing cache.
 
     `present` is the set of frame numbers whose field files are all on disk. A longer Frameend with the same
@@ -200,6 +293,10 @@ def plan_bake(manifest: Manifest | None, params: dict, frame_start: int, frame_e
         return {"action": "stale", **base}
     if frame_start != int(manifest.frame_start):
         return {"action": "stale", **base}
+    # storage=None skips the check so a caller that does not know about keyframes still reads old caches.
+    # An empty dict is the legacy layout and matches a manifest that never recorded storage.
+    if storage is not None and ((manifest.extra or {}).get("storage") or {}) != storage:
+        return {"action": "stale", **base}
     resume = frame_end + 1
     for frame in range(frame_start, frame_end + 1):
         if frame not in present:
@@ -209,7 +306,7 @@ def plan_bake(manifest: Manifest | None, params: dict, frame_start: int, frame_e
     return {"action": action, "frame_start": frame_start, "frame_end": frame_end, "resume_frame": resume}
 
 
-def directory_plan(cache_dir, params: dict, frame_start: int, frame_end: int) -> dict:
+def directory_plan(cache_dir, params: dict, frame_start: int, frame_end: int, storage: dict | None = None) -> dict:
     """plan_bake for a cache directory, using the files actually on disk."""
     manifest = read_manifest(cache_dir)
     present: set[int] = set()
@@ -217,10 +314,11 @@ def directory_plan(cache_dir, params: dict, frame_start: int, frame_end: int) ->
         lo = min(int(manifest.frame_start), int(frame_start))
         hi = max(int(manifest.frame_end), int(frame_end))
         present = {frame for frame in range(lo, hi + 1) if frame_exists(cache_dir, manifest, frame)}
-    return plan_bake(manifest, params, frame_start, frame_end, present)
+    return plan_bake(manifest, params, frame_start, frame_end, present, storage=storage)
 
 
-def cache_status(cache_dir, params: dict, frame_start: int | None = None, frame_end: int | None = None) -> str:
+def cache_status(cache_dir, params: dict, frame_start: int | None = None, frame_end: int | None = None,
+                 storage: dict | None = None) -> str:
     """missing: no manifest; stale: parameters, version, or frame_start changed;
     partial: same identity but at least one requested frame is missing (including a range extension);
     complete: every requested frame of every field is present. A requested end inside a longer cache is
@@ -230,7 +328,7 @@ def cache_status(cache_dir, params: dict, frame_start: int | None = None, frame_
         return MISSING
     start = int(manifest.frame_start) if frame_start is None else int(frame_start)
     end = int(manifest.frame_end) if frame_end is None else int(frame_end)
-    action = directory_plan(cache_dir, params, start, end)["action"]
+    action = directory_plan(cache_dir, params, start, end, storage=storage)["action"]
     return {"missing": MISSING, "stale": STALE, "resume": PARTIAL, "complete": COMPLETE}[action]
 
 
@@ -340,13 +438,50 @@ def stored_pixels(res) -> int:
     return math.prod(dims)
 
 
-def estimate_bytes(res, fields: dict, frames: int) -> int:
+def _field_pixels(res, bbox) -> int:
+    shape = bbox_shape(bbox) if bbox is not None else [int(v) for v in res]
+    if len(shape) >= 3:
+        return stored_pixels(shape[:3])
+    return math.prod(int(v) for v in shape)
+
+
+def estimate_bytes(res, fields: dict, frames: int, storage: dict | None = None, frame_start: int = 1,
+                   bboxes: dict | None = None) -> int:
     """Uncompressed upper bound; EXR zip usually lands at 30-70% of this for smoke.
 
     A 3D `res` is stored as a 2D slice atlas (see atlas_layout), so the bound uses the atlas pixel count.
     When the slice grid is exact and no edge padding is required, that equals the voxel count.
+
+    `storage` selects a reduced layout: keyframes store `keyframe_fields` (default: every field) and the
+    frames between them store `playback_fields`. `bboxes` maps a frame number to an inclusive voxel box;
+    fields listed in `storage["crop_fields"]` then use that box's atlas instead of the full grid. Without
+    `storage` and `bboxes` the bound is the full layout, which is what phases 1-3 write.
     """
-    return stored_pixels(res) * sum(BYTES_PER_PIXEL.get(fmt, 16) for fmt in fields.values()) * int(frames)
+    frames = int(frames)
+    if not storage and not bboxes:
+        return stored_pixels(res) * sum(BYTES_PER_PIXEL.get(fmt, 16) for fmt in fields.values()) * frames
+    storage = dict(storage or {})
+    crop_fields = set(storage.get("crop_fields") or [])
+    total = 0
+    # A tiny stand-in manifest so fields_for_frame / is_keyframe see the same rules the baker uses.
+    standin = Manifest(
+        sim="", params={}, fields=dict(fields), res=list(res), bounds=[], fps=1, substeps=1,
+        frame_start=int(frame_start), frame_end=int(frame_start) + frames - 1,
+        extra={"storage": storage} if storage else {},
+    )
+    for index in range(frames):
+        frame = int(frame_start) + index
+        names = fields_for_frame(standin, frame)
+        bbox = None
+        if bboxes:
+            bbox = bboxes.get(str(frame))
+            if bbox is None:
+                bbox = bboxes.get(frame)
+        for name in names:
+            fmt = fields.get(name, "rgba16float")
+            use_box = bbox if name in crop_fields and not is_keyframe(standin, frame) else None
+            total += _field_pixels(res, use_box) * BYTES_PER_PIXEL.get(fmt, 16)
+    return int(total)
 
 
 def blend_frames(t: float, frame_start: int, frame_end: int) -> tuple[int, int, float]:

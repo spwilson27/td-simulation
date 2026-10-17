@@ -47,8 +47,9 @@ DATs file-synced to the repo.
   inactive after each step (see Fluid2D.Step).
 - `TOP.save(path)` writes EXR; float32/16 round-trips are bit-exact. Movie File In cannot open EXRs only a few rows
   tall (fine >= 96 px). Movie File In loads synchronously on cook.
-- Pure open domain boundaries were unstable on the collocated grid: sides are walls in the pressure solve, "open"
-  sides get an absorbing band.
+- Pure open domain boundaries were unstable on the 2D collocated grid: those sides stay walls in the pressure
+  solve and get an absorbing band. In 3D an open side is a Dirichlet pressure boundary (ghost pressure 0).
+  All-Neumann pressure is singular once combustion adds divergence, and that leftover is a residual floor.
 - Python in TD: 3.11, numpy 2.1 available, no scipy.
 - Feedback TOP does not capture a 3D texture. With a 3D target it passes its wired input through and the value
   does not accumulate across cooks. Persistent 3D state is a pair of Cache TOPs. An inactive Cache TOP keeps the
@@ -89,16 +90,19 @@ DATs file-synced to the repo.
 - A particle step has to integrate position and velocity from the same previous snapshot. Writing the new position snapshot before the velocity cook makes a resumed step (still reading the loaded frame) disagree with a continuous one. Leave those solved nulls locked afterwards so a save does not integrate a second time.
 - The reaction a particle writes into the bus is `Couplingstrength * mass * drag * (v_p - v_f) / (density * cell volume)`, with `Particlemass` stored in nanograms. The 2D splat is one 32² workgroup of shared integer atomics, so a million light embers stay a small acceleration. Heat uses the same mass ratio. The bus merge is selected by a parameter, so the particle step has to cook it or the fluid never sees the new grid. While advecting on the bus, position and velocity are snapped to 1e-4 (velocity biased by one fluid bin) so a resumed sample that is one quantize step off stays on the same side of the boundary. Constant-velocity tracers are not snapped.
 - A particle bake leaves `SetInit` on the Movie File In. Call `SetInit(None)` before the next live step or the integrator reads the cache. The same run can leave the cache reader's `Frame` expression and the clock seed off their fluid defaults. `bake_check` and the phase 2 resume match the committed sequence only after that expression is `op.simclock.par.Frame`, Interpolate is on, and the seed is 0.
+- The 3D divergence and the pressure gradient have to be adjoints of the same matrix. Central differences over two cells compose to a wide stencil; Jacobi on the compact 7-point Laplacian then barely changes the divergence you measure. The matching pair is a face flux owned by the upstream cell (obstacle velocity on a solid face, 0 on a closed face) and a forward difference of pressure. An open face uses ghost pressure 0.
+- Full-weighting restriction of that residual, trilinear prolongation at gain 1, and `busCell()` at each level (so the coarse unknown sees spacing 2h) is a real V-cycle. Gain 0.05 was compensating for the stencil mismatch. Four cycles with 14 weighted-Jacobi sweeps (omega 2/3) are the bake solve. Red-black Gauss-Seidel on the read-write multipass did not converge better. A manufactured zero-mean sine mode on the numpy reference drops about 4.1× per cycle with 4 sweeps and about 9.2× per cycle with 14 (about 8.6× with a solid). On the GPU the first cycle of the live fire does most of the reduction. The old ~0.011 RMS floor was the incompatible Neumann component, not a measurement cutoff. Do not drop projections whose incoming RMS is small.
+- A cropped scalar Movie File In is left on custom resolution, and its volume decode is bypassed. The next non-cropped cache (phase 2 included) has to set that movie back to native and turn the bypass off, or the scalar replay reads the atlas instead of the volume.
+- The baker only saves the last substep of an output frame. Saving the earlier substep as well used the same filename and then overwrote it.
 
 ## Phase plan
 1. Done: clock, bus, baker, cache reader, GPU probe, 2D smoke/fire.
 2. Done: 3D bus, 128³ fluid, raymarched volume, analytic and mesh SDFs, damped multigrid pressure, slice-atlas caches.
 3. Done: GPU particles, 1024² state textures, bus advection in 2D and 3D, SDF collisions, field emission, additive instanced splats into bus forces and sources, EXR caches with resume and exact replay.
-4. High-res baked smoke/fire: 256^3+ bakes, real-time detail upres on playback, cache size reduction (field
-   selection, half precision, crop, async save). Must fix the pressure solve first: the Phase 2 multigrid (coarse
-   gain 0.05) and Jacobi 12 each remove only ~10-15% of divergence RMS per projection, which is not incompressible.
-   Target ≥10× RMS reduction per projection at 256³ (e.g. a proper V-cycle with consistent restriction/prolongation
-   or a MAC-staggered grid), measured as divergence reduction per GPU millisecond against Jacobi.
+4. Done: adjoint 7-point pressure projection, Dirichlet pressure on open sides, and a 4-cycle V-cycle
+   (full-weight restriction, trilinear prolongation, gain 1, weighted Jacobi). 256³ bakes with keyframe
+   resume, scalar crop, and display-time upres. Realtime stays on Jacobi. The projection ratio is the RMS
+   of div(u) − expansion on every step, with no incoming-RMS cutoff.
 5. Destruction: Voronoi fracture in pure Python/numpy, Bullet Solver COMP if usable on macOS else own GPU rigid
    bodies, triggers, pieces as moving bus obstacles, debris particles and dust; baked many-piece version.
 6. FLIP liquids (bake + real-time 2D preview): GPU binning + gather P2G, multigrid pressure, surface (marching cubes
@@ -113,3 +117,6 @@ DATs file-synced to the repo.
    (validate_phase3 tolerates ≤ 2.5e-4 in pvel only). Find the real source and make coupled resume byte-exact.
    Fluid2D also snaps vel/pressure to 1e-5 and scalars to 1e-4 every step (`q_*` / `quantize.glsl`), added for the
    same reason; test removing it once the splat is deterministic (it costs three passes and kills smoke < 5e-5).
+   Phase 4 debt: playback "upres" is mostly screen grain (it also speckles obstacles) and is validated on an early,
+   small plume. Replace with real detail (wavelet turbulence / advected curl-noise in the volume, masked to smoke)
+   and validate on a developed showcase frame. Multigrid at 256³ costs ~360 ms per projection (2.8 steps/s bake).

@@ -411,7 +411,7 @@ These did not:
 
 ## 3D smoke and fire
 
-`/sims/bus3d` (`op.simbus3d`) is a second bus. The 2D bus is unchanged. Publishers use the same `Publish(kind, top)` table and merge TOPs; the merges are compute shaders writing `texture3d`. World axes are the same (+y up) with a z extent. Default bounds are (−1, 0, −1) to (1, 2, 1), so a cubic grid has cubic cells. Default resolution is 128³. Open sides are still an absorbing band; the pressure solve treats every face as a wall. Front and back (`Wallfront`, `Wallback`) default closed, and the top defaults open.
+`/sims/bus3d` (`op.simbus3d`) is a second bus. The 2D bus is unchanged. Publishers use the same `Publish(kind, top)` table and merge TOPs; the merges are compute shaders writing `texture3d`. World axes are the same (+y up) with a z extent. Default bounds are (−1, 0, −1) to (1, 2, 1), so a cubic grid has cubic cells. Default resolution is 128³. An open side is a Dirichlet pressure boundary (ghost pressure 0) and an absorbing band. A closed side is a Neumann wall. Front and back (`Wallfront`, `Wallback`) default closed, and the top defaults open.
 
 Shaders include the contract with `#include <bus3d_glsl>`.
 
@@ -439,9 +439,11 @@ The step is RK2 semi-Lagrangian advection, optional MacCormack, combustion, buoy
 
 ### Pressure
 
-`Solver` is `jacobi` or `multigrid`. Jacobi is one compute TOP, `Jacobi` passes, the same compact 7-point stencil as the 2D solver extended by z. The realtime preset uses it: on this collocated grid it stays stable.
+`Solver` is `jacobi` or `multigrid`. The divergence and the pressure gradient are adjoints of the compact 7-point Laplacian. Each fluid cell owns the face on its +side: the flux is that cell's velocity when the neighbour is fluid, the obstacle velocity when either side is solid, and 0 on a closed domain face. An open domain face uses ghost pressure 0 and lets the fluid leave. Projection subtracts the forward difference of pressure across that face. A centred difference over two cells does not match this matrix, which is why the old Jacobi step barely moved the measured divergence. The right-hand side is velocity divergence minus the expansion stored in `scalars.a`. With Neumann walls on every side that right-hand side does not sum to zero (combustion and inflow add mass), so the Poisson problem has no solution and a residual floor is left behind. The open top removes that null space.
 
-Multigrid is a V-cycle on four levels (N, N/2, N/4, N/8). Smoothing is red-black Gauss-Seidel (one color per pass, `Smooth` passes before restriction and again after prolongation). The coarsest level runs `Coarse` iterations. The coarse correction is added with `Coarsegain`. A gain of 1 overshoots: the prolongation injects a high-frequency error that the following sweeps do not fully remove, and the velocity diverges. A gain around 0.05 is the stable setting. It is a real V-cycle, and on a short run it can cut divergence about as well as a similar Jacobi count; it does not replace Jacobi for the long realtime preset. `Vcycles` 2 runs a second cycle (`b_*` TOPs). Those stay bypassed when the count is 1.
+Jacobi is one compute TOP, `Jacobi` passes. The realtime preset uses it so the 128³ view stays above 30 fps.
+
+Multigrid is a geometric V-cycle down to a 4³–8³ grid. Restriction is full weighting of the residual, prolongation is trilinear, and `Coarsegain` is 1. Smoothing is weighted Jacobi (omega 2/3), `Smooth` passes before restriction and again after prolongation. The coarsest level runs `Coarse` iterations at spacing 2h, 4h, and so on. `Vcycles` 4 runs four cycles (`a_*` through `d_*`); unused cycles stay bypassed. Bake mode uses that solve. The measured quantity is the RMS of `div(u) - expansion` on every projection, with no cutoff on the incoming field. A manufactured zero-mean sine mode on the numpy V-cycle (all-Neumann, mean removed, 32³) drops about 4.1× per cycle with 4 smoothing sweeps and about 9.2× per cycle with 14; a solid block in the box stays around 8.6–9.1× at 14 sweeps. On the live fire the first GPU cycle does most of the work (about 46× at 128³ and 30× at 256³ on the last step of the sample) and the later cycles keep cutting the remainder. `scripts/validate_phase4.py` records the median and the 99th-percentile reduction.
 
 ### Obstacles
 
@@ -495,19 +497,30 @@ At the default coupling the fluid's mean absolute velocity change was 0.0041 and
 
 ## 3D presets
 
-`ApplyPreset` sets the cubic resolution, the multigrid iteration counts, the ray budget, and Jacobi. Preview and realtime leave `Solver` on Jacobi. Bake selects multigrid. Substeps stay 1, so applying a 3D preset does not change the 2D timestep the way the 2D bake preset does.
+`ApplyPreset` sets the cubic resolution, the multigrid iteration counts, the ray budget, and Jacobi. Preview and realtime leave `Solver` on Jacobi and do not change the clock substeps. Bake selects multigrid and sets substeps to 2, so it does change the timestep of every sim the clock steps, the same way the 2D bake preset does.
 
-| Preset | Grid | Jacobi | Smooth | Coarse | V-cycles |
-| --- | --- | --- | --- | --- | --- |
-| preview | 96³ | 12 | 6 | 16 | 1 |
-| realtime | 128³ | 16 | 8 | 20 | 1 |
-| bake | 192³ | 24 | 12 | 32 | 2 |
+### High-resolution bakes
+
+`/sims/demo_bake` Apply points the baker at `fluid3d`, selects the bake preset, and turns on a reduced cache: a full velocity/scalars/pressure keyframe every `Keyinterval` frames, scalars only in between, with those scalar frames cropped to the occupied box (`extra.bboxes` in the manifest). Resume loads the latest keyframe and re-simulates forward. `cache.estimate_bytes` takes the same `storage` and `bboxes`. The cache reader expands a cropped frame back to the full volume.
+
+Playback detail is `Detail` on the volume shader: a small advected warp of the sample plus grain on the smoke that was actually hit. `Detail` 0 is the cached field unchanged. The realtime 128³ preset does not need it.
+
+`scripts/validate_phase4.py` checks the pressure ratio, a 24-frame 256³ cancel-and-resume, cache bytes against the estimate, playback rate, and the upres picture, then runs `bake_check`, `validate_phase2`, `validate_phase3`, the shader check, and pytest.
+
+The bake projection is scored on every step, not on a subset of the sample. On the M4 Max the median RMS reduction of `div(u) - expansion` was 108× at 128³ (1.84 per GPU-ms, against Jacobi 12 at 0.16) and 97.8× at 256³ (0.27 per GPU-ms, against 0.023). The 99th percentile of `|div|` over the whole volume, which is mostly empty cells, dropped by a median of 14.0× at 128³ and 12.0× at 256³. The multigrid step is about 17 fps at 128³ and 2.8 fps at 256³, so the realtime preset stays on Jacobi (the phase 2 render check still clears 30 fps). A 24-frame reduced 256³ cache was 14.8 MB/frame and byte-identical across cancel-and-resume. The 120-frame showcase is about 2.4 GB. Playback sat on the 120 fps cap. A 384³ Jacobi step and a 512×512×256 Jacobi step both stayed finite.
+
+| Preset | Grid | Solver | Jacobi | Smooth | Coarse | V-cycles | Substeps |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| preview | 96³ | Jacobi | 12 | 4 | 24 | 1 | 1 |
+| realtime | 128³ | Jacobi | 16 | 4 | 32 | 1 | 1 |
+| bake | 256³ | multigrid | 24 | 14 | 40 | 4 | 2 |
+| high | 384³ | multigrid | 16 | 14 | 40 | 4 | 1 |
 
 ## Known limitations
 
-**Open sides are an absorbing band.** The pressure solve treats every domain edge as a wall, including sides marked open. An open side adds extra decay, across `Spongewidth`, to the advected velocity and scalars. Leaving the pressure at 0 outside the domain went unstable on this collocated grid as soon as the plume reached the edge.
+**Open sides.** In 2D the pressure solve still treats every edge as a wall, and an open side only adds extra decay across `Spongewidth`. A pressure of 0 past the edge was unstable on that collocated grid. In 3D an open side is a Dirichlet pressure boundary (ghost pressure 0) as well as the absorbing band. That is what makes the pressure problem solvable when combustion adds divergence. The realtime preset stays on Jacobi and still has to hold 30 fps.
 
-**The 2D pressure solver is Jacobi with a fixed iteration count.** The 2D residual at high resolution is whatever `Jacobi` iterations can remove from a warm start. The 2D bake preset uses 80 iterations; the realtime preset uses 30. The 3D solver can run a damped multigrid V-cycle; see the 3D pressure section. Full-gain prolongation is unstable on this collocated grid.
+**The 2D pressure solver is Jacobi with a fixed iteration count.** The 2D residual at high resolution is whatever `Jacobi` iterations can remove from a warm start. The 2D bake preset uses 80 iterations; the realtime preset uses 30. The 3D bake preset uses the V-cycle described above.
 
 **The 3D particle splat does not hold 30 fps at a million particles.** Advecting those particles beside the 128³ volume render does. Drawing every particle into the slice atlas is a second full-frame pass and drops the combined rate well below 30. Leave `Coupling` at 0 when the volume has to keep that rate. The 2D splat, into the 1024² bus, stays above 30 fps together with the realtime fluid. Two-way coupling is measured with the 2D bus.
 

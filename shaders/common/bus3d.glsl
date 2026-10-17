@@ -8,8 +8,9 @@
 //   forces     rgba32float                  xyz acceleration in world units / s^2
 //   obstacles  rgba32float                  r signed distance (world units, < 0 inside), gba obstacle velocity
 //
-// Domain sides are walls in the pressure solve. A side marked open gets an absorbing band (busSponge), same
-// compromise as the 2D bus: a true open pressure boundary was unstable on the collocated grid.
+// A side marked open is a Dirichlet pressure boundary (ghost pressure 0) and an absorbing band
+// (busSponge). A closed side is a Neumann wall. All-Neumann pressure is singular once combustion
+// adds divergence, so the open top is what lets that expansion leave.
 
 uniform vec4 uBMin;     // xyz world min
 uniform vec4 uBMax;     // xyz world max
@@ -63,6 +64,26 @@ vec3 busClampUV(vec3 uv)
 
 bool busSolid(vec4 obstacle) { return obstacle.r < 0.0; }
 vec3 busObstacleVel(vec4 obstacle) { return obstacle.gba; }
+
+// `dir` is the step from a cell to a neighbour. An open domain side is a Dirichlet pressure
+// boundary (ghost pressure 0) so a net expansion has somewhere to leave. A closed side mirrors
+// pressure (Neumann). Without at least one Dirichlet side the Poisson problem is singular:
+// combustion adds divergence and the walls cannot carry it, so a residual floor is left behind.
+bool busSideOpen(ivec3 dir)
+{
+	if (dir.x > 0) return uWalls.y < 0.5;
+	if (dir.x < 0) return uWalls.x < 0.5;
+	if (dir.y > 0) return uWalls.w < 0.5;
+	if (dir.y < 0) return uWalls.z < 0.5;
+	if (dir.z > 0) return uWallsZ.y < 0.5;
+	if (dir.z < 0) return uWallsZ.x < 0.5;
+	return false;
+}
+
+float busPressureGhost(ivec3 dir, float centre)
+{
+	return busSideOpen(dir) ? 0.0 : centre;
+}
 
 float busSponge(vec3 uv)
 {

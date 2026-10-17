@@ -89,6 +89,47 @@ def test_estimate_bytes():
     assert cache.estimate_bytes([128, 128, 128], {"d": "mono16float"}, 1) == 128 ** 3 * 2
 
 
+def test_occupied_bbox_pads_and_clamps():
+    assert cache.occupied_bbox([], [8, 8, 8]) == [0, 0, 0, 7, 7, 7]
+    assert cache.occupied_bbox([(1, 2, 3), (4, 5, 6)], [8, 8, 8], pad=2) == [0, 0, 1, 6, 7, 7]
+    assert cache.bbox_shape([1, 2, 3, 4, 5, 6]) == [4, 4, 4]
+
+
+def test_keyframe_fields_and_resume_origin():
+    fields = {"vel": "rgba16float", "scalars": "rgba16float", "pressure": "mono32float"}
+    storage = {"keyframe_interval": 4, "playback_fields": ["scalars"], "crop": True, "crop_fields": ["scalars"]}
+    m = make_manifest(fields=fields, frame_start=1, frame_end=9, extra={"storage": storage})
+    assert cache.is_keyframe(m, 1) and cache.is_keyframe(m, 5) and not cache.is_keyframe(m, 2)
+    assert cache.fields_for_frame(m, 1) == ["vel", "scalars", "pressure"]
+    assert cache.fields_for_frame(m, 3) == ["scalars"]
+    assert cache.resume_state_frame(m, 4) == 1
+    assert cache.resume_state_frame(m, 6) == 5
+    assert cache.resolve_frame(m, "pressure", 3) == 1
+    assert cache.resume_state_frame(m, 1) is None
+
+
+def test_reduced_estimate_and_crop_are_smaller_than_full():
+    fields = {"vel": "rgba16float", "scalars": "rgba16float", "pressure": "mono32float"}
+    res = [64, 64, 64]
+    full = cache.estimate_bytes(res, fields, 8)
+    storage = {"keyframe_interval": 4, "playback_fields": ["scalars"], "crop_fields": ["scalars"]}
+    reduced = cache.estimate_bytes(res, fields, 8, storage=storage, frame_start=1)
+    assert reduced < full
+    bboxes = {str(frame): [8, 8, 8, 23, 39, 23] for frame in range(1, 9)}
+    cropped = cache.estimate_bytes(res, fields, 8, storage=storage, frame_start=1, bboxes=bboxes)
+    assert cropped < reduced
+    # Keyframes stay full-grid, so the cropped bound is still an upper bound once those frames are included.
+    assert cropped > 0
+
+
+def test_storage_mismatch_is_stale():
+    m = make_manifest(extra={"storage": {"keyframe_interval": 4, "playback_fields": ["scalars"]}})
+    present = {1, 2, 3, 4}
+    assert cache.plan_bake(m, m.params, 1, 4, present, storage={"keyframe_interval": 8})["action"] == "stale"
+    assert cache.plan_bake(m, m.params, 1, 4, present, storage=m.extra["storage"])["action"] == "complete"
+    assert cache.plan_bake(m, m.params, 1, 4, present)["action"] == "complete"
+
+
 @pytest.mark.parametrize("t,expected", [
     (2.0, (2, 3, 0.0)), (2.25, (2, 3, 0.25)), (0.0, (1, 2, 0.0)), (9.0, (4, 4, 0.0)), (3.999, (3, 4, 0.999)),
 ])

@@ -403,6 +403,10 @@ if {fluid2d}:
     op('/sims/fluid2d').allowCooking = True
     op('/sims/fluid2d').par.Cookrender = True
     op('/sims/fluid2d').ApplyPreset('realtime')
+# A fluid that is not in this rate sample must not cook. After a 256³ bake its network is still
+# dirty, and pulling it drops the particle rate under 30 fps.
+op('/sims/fluid3d').allowCooking = bool({fluid3d})
+op('/sims/fluid2d').allowCooking = bool({fluid2d})
 c.RequestReset()
 c.Tick()
 print('@@JSON@@' + json.dumps({{'step': int(c.par.Step)}}))

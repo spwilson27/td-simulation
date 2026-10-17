@@ -76,7 +76,25 @@ class Baker:
         extra = {}
         if len(res) >= 3:
             extra["atlas"] = self.cache.atlas_layout(res[:3])
+        storage = self.Storage()
+        if storage:
+            extra["storage"] = storage
         return {"params": params, "fields": sim.StateFormats(), "res": res, "bounds": bounds, "extra": extra}
+
+    def Storage(self) -> dict:
+        """Reduced-cache layout. Empty means every frame stores every state field, as in phases 1-3."""
+        p = self.ownerComp.par
+        out = {}
+        interval = int(p.Keyinterval.eval())
+        if interval > 1:
+            text = str(p.Playbackfields.eval()).strip()
+            out["keyframe_interval"] = interval
+            out["playback_fields"] = text.split() if text else ["scalars"]
+        if bool(p.Crop.eval()):
+            out["crop"] = True
+            out["crop_fields"] = ["scalars"]
+            out["crop_pad"] = int(p.Croppad.eval())
+        return out
 
     def NewManifest(self):
         p = self.ownerComp.par
@@ -104,7 +122,9 @@ class Baker:
     def CacheStatus(self) -> str:
         p = self.ownerComp.par
         params = self.NewManifest().params
-        return self.cache.cache_status(self.CacheDir, params, int(p.Framestart.eval()), int(p.Frameend.eval()))
+        return self.cache.cache_status(
+            self.CacheDir, params, int(p.Framestart.eval()), int(p.Frameend.eval()), storage=self.Storage(),
+        )
 
     # -- actions ----------------------------------------------------------------------------------------------
     def Bake(self) -> None:
@@ -113,7 +133,9 @@ class Baker:
         p, clock = self.ownerComp.par, op.simclock  # noqa: F821
         sim, cache_dir = self.Sim, self.CacheDir
         manifest = self.NewManifest()
-        plan = self.cache.directory_plan(cache_dir, manifest.params, manifest.frame_start, manifest.frame_end)
+        plan = self.cache.directory_plan(
+            cache_dir, manifest.params, manifest.frame_start, manifest.frame_end, storage=self.Storage(),
+        )
         if plan["action"] == "complete" and p.Resume.eval():
             self._set_status("complete (nothing to do)")
             return
@@ -146,9 +168,18 @@ class Baker:
                     one.SetInit({f: self.cache.frame_path(cache_dir, f, resume - 1, one.name) for f in info["fields"]})
                 self._show_loaded_fluid()
                 self._restore_coupling(resume - 1)
+                clock.RequestReset(resume)
             else:
-                sim.SetInit({f: self.cache.frame_path(cache_dir, f, resume - 1) for f in manifest.fields})
-            clock.RequestReset(resume)
+                origin = self.cache.resume_state_frame(manifest, resume)
+                if origin is None:
+                    sim.SetInit(None)
+                    clock.RequestReset(start - warmup)
+                else:
+                    fields = self.cache.fields_for_frame(manifest, origin)
+                    sim.SetInit({f: self.cache.frame_path(cache_dir, f, origin) for f in fields})
+                    # The loaded keyframe is the state after `origin`. The reset tick simulates the next frame.
+                    # When every frame is a keyframe, origin is resume - 1 and this is the phase 1 resume.
+                    clock.RequestReset(origin + 1)
         else:
             for one in self._sims():
                 one.SetInit(None)
@@ -244,10 +275,29 @@ class Baker:
                     table[row, 1] = hold.path
         op.simbus.ext.FieldBus._refresh()  # noqa: F821
 
+    def _maybe_crop(self, field: str, top, frame: int):
+        """Return a cropped atlas TOP for playback fields between keyframes, or `top` unchanged."""
+        storage = (self.manifest.extra or {}).get("storage") or {}
+        if not storage.get("crop") or field not in (storage.get("crop_fields") or []):
+            return top
+        if self.cache.is_keyframe(self.manifest, frame):
+            return top
+        sim = self.Sim
+        if not hasattr(sim, "CropAtlas") or not hasattr(sim, "OccupiedBbox"):
+            return top
+        if getattr(self, "_bbox_frame", None) != int(frame):
+            self._bbox_frame = int(frame)
+            self._bbox_value = list(sim.OccupiedBbox(int(storage.get("crop_pad") or 0)))
+            self.manifest.extra.setdefault("bboxes", {})[str(int(frame))] = self._bbox_value
+        return sim.CropAtlas(field, self._bbox_value)
+
     def _save_frame(self) -> None:
         if not self.baking:
             return
         c, m = op.simclock.ext.SimClockExt.Clock, self.manifest  # noqa: F821
+        # Only the last substep of an output frame is the state that gets saved.
+        if not c.frame_complete:
+            return
         asynchronous = bool(self.ownerComp.par.Asyncsave.eval())
         if m.members:
             targets = []
@@ -260,7 +310,12 @@ class Baker:
                     targets.append((one.name, field, top))
         else:
             targets = [(None, field, top) for field, top in self.Sim.StateTops().items()]
+        needed = None if m.members else set(self.cache.fields_for_frame(m, c.frame))
         for sim_name, field, top in targets:
+            if needed is not None and field not in needed:
+                continue
+            if needed is not None:
+                top = self._maybe_crop(field, top, c.frame)
             path = self.cache.frame_path(self.CacheDir, field, c.frame, sim_name)
             path.parent.mkdir(parents=True, exist_ok=True)
             top.save(str(path), asynchronous=asynchronous)

@@ -342,6 +342,10 @@ def build_baker(sims):
     par(b, "Bake", "int", "Frameend", 120)
     par(b, "Bake", "int", "Warmup", 0)
     par(b, "Bake", "toggle", "Resume", True)
+    par(b, "Bake", "int", "Keyinterval", 0, label="Keyframe Interval", minmax=(0, 120))
+    par(b, "Bake", "str", "Playbackfields", "", label="Playback Fields")
+    par(b, "Bake", "toggle", "Crop", False, label="Crop Scalars")
+    par(b, "Bake", "int", "Croppad", 2, label="Crop Pad", minmax=(0, 16))
     par(b, "Bake", "toggle", "Asyncsave", False, label="Async Save")
     par(b, "Bake", "toggle", "Pauseafter", True, label="Pause After Bake")
     par(b, "Bake", "pulse", "Bake")
@@ -373,6 +377,8 @@ def build_cache_reader(sims):
     scale_src = shader(r, "scale_src", "shaders/common/scale.glsl", -1, 3)
     render_src = shader(r, "render_src", "shaders/fluid2d/render_fire.glsl", -1, 4)
     shader(r, "atlas_decode_src", "shaders/common/atlas_decode.glsl", -1, 5)
+    shader(r, "atlas_expand_src", "shaders/common/atlas_expand.glsl", -1, 6)
+    shader(r, "blend3d_src", "shaders/common/blend3d.glsl", -1, 7)
     for i, field in enumerate(("vel", "scalars", "pressure")):
         ab = []
         for j, which in enumerate("ab"):
@@ -429,6 +435,7 @@ def build(parent_path: str = "/") -> dict:
     build_fluid3d.build_bus3d(sims, me)
     build_fluid3d.build_fluid3d(sims, me)
     build_fluid3d.build_demo3d(sims, me)
+    build_fluid3d.build_demo_bake(sims, me)
     import build_particles  # noqa: PLC0415
     importlib.reload(build_particles)
     build_particles.build_particles(sims, me)

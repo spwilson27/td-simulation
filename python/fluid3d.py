@@ -21,9 +21,15 @@ PHYSICS_PARS = (
 )
 
 PRESETS = {
-    "preview": {"res": 96, "substeps": 1, "smooth": 6, "coarse": 16, "vcycles": 1, "rays": 36, "shadow": 12},
-    "realtime": {"res": 128, "substeps": 1, "smooth": 8, "coarse": 20, "vcycles": 1, "rays": 48, "shadow": 16},
-    "bake": {"res": 192, "substeps": 1, "smooth": 12, "coarse": 32, "vcycles": 2, "rays": 64, "shadow": 20},
+    # Realtime stays on Jacobi so the 128³ preview holds 30 fps. Bake uses the V-cycle.
+    "preview": {"res": 96, "substeps": 1, "smooth": 4, "coarse": 24, "vcycles": 1, "rays": 36, "shadow": 12,
+                "solver": "jacobi", "jacobi": 12},
+    "realtime": {"res": 128, "substeps": 1, "smooth": 4, "coarse": 32, "vcycles": 1, "rays": 48, "shadow": 16,
+                 "solver": "jacobi", "jacobi": 16},
+    "bake": {"res": 256, "substeps": 2, "smooth": 14, "coarse": 40, "vcycles": 4, "rays": 56, "shadow": 16,
+             "solver": "multigrid", "jacobi": 24},
+    "high": {"res": 384, "substeps": 1, "smooth": 14, "coarse": 40, "vcycles": 4, "rays": 48, "shadow": 12,
+             "solver": "multigrid", "jacobi": 16},
 }
 
 
@@ -66,13 +72,18 @@ class Fluid3D:
         solver = str(self.ownerComp.par.Solver.eval())
         cycles = int(self.ownerComp.par.Vcycles.eval())
         use_mg = solver == "multigrid"
-        self.ownerComp.op("pressure_sel").par.index = 0 if not use_mg else (2 if cycles >= 2 else 1)
+        self.ownerComp.op("pressure_sel").par.index = 0 if not use_mg else min(max(cycles, 1), 4)
         self.ownerComp.op("jacobi").bypass = use_mg
         for child in self.ownerComp.children:
-            if child.name.startswith("a_"):
+            prefix = child.name[:2]
+            if prefix == "a_":
                 child.bypass = not use_mg
-            elif child.name.startswith("b_"):
+            elif prefix == "b_":
                 child.bypass = not (use_mg and cycles >= 2)
+            elif prefix == "c_":
+                child.bypass = not (use_mg and cycles >= 3)
+            elif prefix == "d_":
+                child.bypass = not (use_mg and cycles >= 4)
 
     def Step(self) -> None:
         for field in STATE:
@@ -141,11 +152,10 @@ class Fluid3D:
         p.Vcycles = preset["vcycles"]
         p.Raysteps = preset["rays"]
         p.Shadowsteps = preset["shadow"]
-        p.Coarsegain = 0.05
-        # Full-strength prolongation overshoots this collocated stencil. Realtime uses Jacobi;
-        # multigrid stays available (Solver=multigrid, Coarsegain ~0.05) and is what the pressure benchmark compares.
-        p.Solver = "jacobi" if name != "bake" else "multigrid"
-        p.Jacobi = 12 if name == "preview" else (16 if name == "realtime" else 24)
+        # Gain 1 is the V-cycle. The old 0.05 gain was papering over a divergence/Laplacian mismatch.
+        p.Coarsegain = 1.0
+        p.Solver = preset["solver"]
+        p.Jacobi = preset["jacobi"]
         p.Preset = name
         demo = op("/sims/demo3d")  # noqa: F821
         if demo is not None and hasattr(demo, "RebuildMesh"):
@@ -159,7 +169,7 @@ class Fluid3D:
             return float(self.ownerComp.par.Jacobi.eval())
         smooth = int(self.ownerComp.par.Smooth.eval())
         coarse = int(self.ownerComp.par.Coarse.eval())
-        levels = 4
+        levels = 6
         work = 0.0
         for level in range(levels):
             weight = (max(4.0, math.floor(res / (2 ** level))) / res) ** 3
@@ -236,3 +246,45 @@ class Fluid3D:
             "divergence_factor": (div_pre / div_post) if div_post > 0 else None,
             "multigrid_beats_jacobi": post < jpost,
         }
+
+    def OccupiedBbox(self, pad: int = 0) -> list:
+        """Inclusive voxel box of scalar texels that are not zero. Empty smoke is the full domain."""
+        import numpy as np  # noqa: PLC0415
+
+        import cache  # noqa: PLC0415
+
+        sc = self.ownerComp.op("scalars_out").numpyArray(delayed=False)
+        res = list(op.simbus3d.Res)  # noqa: F821
+        if sc is None or sc.size == 0:
+            return cache.occupied_bbox([], res, pad)
+        active = np.any(sc != 0, axis=-1)
+        zs, ys, xs = np.nonzero(active)
+        if xs.size == 0:
+            return cache.occupied_bbox([], res, pad)
+        return cache.occupied_bbox(
+            [(int(xs.min()), int(ys.min()), int(zs.min())), (int(xs.max()), int(ys.max()), int(zs.max()))],
+            res, pad,
+        )
+
+    def CropAtlas(self, field: str, bbox: list):
+        """Point the bypassed crop encoder at `bbox` and return it. The caller saves that TOP."""
+        import cache  # noqa: PLC0415
+
+        shape = cache.bbox_shape(bbox)
+        layout = cache.atlas_layout(shape)
+        top = self.ownerComp.op("crop_" + field)
+        top.bypass = False
+        top.par.resolutionw.expr = ""
+        top.par.resolutionh.expr = ""
+        top.par.resolutionw = int(layout["width"])
+        top.par.resolutionh = int(layout["height"])
+        top.par.vec0valuex = int(layout["cols"])
+        top.par.vec0valuey = int(layout["rows"])
+        top.par.vec0valuez = int(shape[0])
+        top.par.vec0valuew = int(shape[1])
+        top.par.vec1valuex = int(shape[2])
+        top.par.vec2valuex = int(bbox[0])
+        top.par.vec2valuey = int(bbox[1])
+        top.par.vec2valuez = int(bbox[2])
+        top.cook(force=True)
+        return top

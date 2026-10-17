@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import td
 
-LEVELS = 4
+LEVELS = 6
 
 
 def bus_uniforms():
@@ -180,13 +180,13 @@ def _vcycle(bn, comp, prefix, shaders, pin, div, obs, zeros, col):
 
 def build_fluid3d(sims, bn):
     f = bn.place(sims.create(td.baseCOMP, "fluid3d"), 7, 0)
-    bn.par(f, "Sim", "menu", "Preset", "realtime", menu=["preview", "realtime", "bake"])
+    bn.par(f, "Sim", "menu", "Preset", "realtime", menu=["preview", "realtime", "bake", "high"])
     bn.par(f, "Sim", "pulse", "Applypreset", label="Apply Preset")
     bn.par(f, "Sim", "menu", "Solver", "jacobi", menu=["multigrid", "jacobi"])
-    bn.par(f, "Sim", "int", "Vcycles", 1, minmax=(1, 2))
+    bn.par(f, "Sim", "int", "Vcycles", 1, minmax=(1, 4))
     bn.par(f, "Sim", "int", "Smooth", 8, label="Smooth Iterations", minmax=(1, 40))
     bn.par(f, "Sim", "int", "Coarse", 20, label="Coarse Iterations", minmax=(1, 80))
-    bn.par(f, "Sim", "float", "Coarsegain", 0.05, label="Coarse Gain", minmax=(-0.25, 1))
+    bn.par(f, "Sim", "float", "Coarsegain", 1.0, label="Coarse Gain", minmax=(0.0, 1.0))
     bn.par(f, "Sim", "int", "Jacobi", 16, minmax=(1, 200))
     bn.par(f, "Sim", "toggle", "Cookrender", True, label="Cook Render")
     bn.par(f, "Sim", "int", "Raysteps", 40, minmax=(8, 96))
@@ -200,7 +200,7 @@ def build_fluid3d(sims, bn):
     for name, default in physics:
         bn.par(f, "Physics", "float", name, default)
     for name, default in (("Smokedensity", 4.5), ("Fireintensity", 3.5), ("Whitehot", 2.8), ("Obstacleshade", 1.0),
-                          ("Background", 0.012)):
+                          ("Background", 0.012), ("Detail", 0.0), ("Detailfreq", 10.0), ("Detailadvect", 0.35)):
         bn.par(f, "Look", "float", name, default)
     bn.par(f, "Look", "rgb", "Smokecolor", [0.45, 0.48, 0.55])
     for name, default in (("Camaz", 0.7), ("Camel", 0.38), ("Camdist", 4.2), ("Camfov", 38.0)):
@@ -218,6 +218,7 @@ def build_fluid3d(sims, bn):
     bn.shader(f, "zero_src", "shaders/common/zero3d.glsl", -1, 20)
     bn.shader(f, "atlas_encode_src", "shaders/common/atlas_encode.glsl", -1, 21)
     bn.shader(f, "atlas_decode_src", "shaders/common/atlas_decode.glsl", -1, 22)
+    bn.shader(f, "crop_atlas_src", "shaders/common/atlas_crop.glsl", -1, 23)
 
     P = "parent().par."
     sels = {k: select(bn, f, "in_" + k, f"op.simbus3d.path + '/{k}'", 0, i) for i, k in enumerate(("sources", "forces", "obstacles"))}
@@ -257,12 +258,14 @@ def build_fluid3d(sims, bn):
     level_zeros = [None] + [_level_zero(bn, f, level_zero_src, level, 10) for level in range(1, LEVELS)]
     mg = _vcycle(bn, f, "a", src, pr, div, obs, level_zeros, 11)
     mg2 = _vcycle(bn, f, "b", src, mg, div, obs, level_zeros, 15)
+    mg3 = _vcycle(bn, f, "c", src, mg2, div, obs, level_zeros, 31)
+    mg4 = _vcycle(bn, f, "d", src, mg3, div, obs, level_zeros, 35)
     for child in f.children:
-        if child.name.startswith("b_"):
+        if child.name[:2] in ("b_", "c_", "d_"):
             child.bypass = True
     jac = glsl3d(bn, f, "jacobi", src["jacobi"], [pr, div, obs], "mono32float", npasses="parent().par.Jacobi", col=19, row=0)
     jac.bypass = True
-    pressure = bn.switch(f, "pressure_sel", [jac, mg, mg2], 20, 0)
+    pressure = bn.switch(f, "pressure_sel", [jac, mg, mg2, mg3, mg4], 20, 0)
     pressure.par.index = 1
     proj = glsl3d(bn, f, "project", src["project"], [forced, pressure, obs], "rgba16float",
                   [("uLimit", (P + "Maxspeed",))], 21, 0)
@@ -276,11 +279,21 @@ def build_fluid3d(sims, bn):
         out = select(bn, f, field + "_out", h0.path, 25, i)
         glsl_pixel(bn, f, field + "_atlas", f.op("atlas_encode_src"), [out], formats[field], atlas_uniforms(),
                    "op('/sims/fluid3d').AtlasWidth()", "op('/sims/fluid3d').AtlasHeight()", 26, i, filtering="nearest")
+        crop = glsl_pixel(bn, f, "crop_" + field, f.op("crop_atlas_src"), [out], formats[field],
+                          [("uAtlas", (1, 1, 16, 16)), ("uAtlas2", (1, 0, 0, 0)), ("uOrigin", (0, 0, 0, 0))],
+                          "256", "256", 26, 4 + i, filtering="nearest")
+        crop.par.resolutionw.expr = ""
+        crop.par.resolutionh.expr = ""
+        crop.par.resolutionw = 256
+        crop.par.resolutionh = 256
+        crop.bypass = True
     glsl3d(bn, f, "div_check", src["divergence"], [f.op("vel_out"), obs, f.op("scalars_out")], "mono32float", col=27, row=0)
     glsl3d(bn, f, "residual_pre", src["residual"], [pr, div, obs], "mono32float", col=27, row=1)
     glsl3d(bn, f, "residual_mg", src["residual"], [mg, div, obs], "mono32float", col=27, row=2)
     glsl3d(bn, f, "residual_jac", src["residual"], [jac, div, obs], "mono32float", col=27, row=3)
-    shadow = glsl3d(bn, f, "shadow", src["shadow"], [f.op("scalars_out")], "mono16float",
+    select(bn, f, "view_scalars", f.op("scalars_out").path, 28, 0)
+    select(bn, f, "view_vel", f.op("vel_out").path, 28, 2)
+    shadow = glsl3d(bn, f, "shadow", src["shadow"], [f.op("view_scalars")], "mono16float",
                     [("uLight", (P + "Lightx", P + "Lighty", P + "Lightz", 0)),
                      ("uLook", (P + "Smokedensity", P + "Shadowsteps", 0, 0))], 28, 1, filtering="linear")
     render_uniforms = [
@@ -294,8 +307,10 @@ def build_fluid3d(sims, bn):
         ("uLook", (P + "Smokedensity", P + "Fireintensity", P + "Whitehot", P + "Obstacleshade")),
         ("uSmoke", (P + "Smokecolorr", P + "Smokecolorg", P + "Smokecolorb", P + "Background")),
         ("uRay", (P + "Raysteps", 0, 0, 0)),
+        ("uDetail", (P + "Detail", P + "Detailfreq", P + "Detailadvect", 0)),
     ]
-    render = glsl_pixel(bn, f, "render", src["render_volume"], [f.op("scalars_out"), obs, shadow], "rgba16float",
+    render = glsl_pixel(bn, f, "render", src["render_volume"],
+                        [f.op("view_scalars"), obs, shadow, f.op("view_vel")], "rgba16float",
                         render_uniforms, P + "Renderw", P + "Renderh", 29, 1)
     bn.null(f, "render_out", render, 30, 1)
     return f
@@ -419,4 +434,16 @@ def build_demo3d(sims, bn):
             ("uVel", (mv, 0, 0, 0)),
             ("uSdf0", (P + "Sdfminx", P + "Sdfminy", P + "Sdfminz", 0)),
             ("uSdf1", (P + "Sdfmaxx", P + "Sdfmaxy", P + "Sdfmaxz", 0))], 2, 4, filtering="linear")
+    return d
+
+
+def build_demo_bake(sims, bn):
+    d = bn.place(sims.create(td.baseCOMP, "demo_bake"), 9, 0)
+    bn.par(d, "Bake", "int", "Frames", 120, minmax=(1, 600))
+    bn.par(d, "Bake", "int", "Keyinterval", 8, label="Keyframe Interval", minmax=(1, 64))
+    bn.par(d, "Bake", "str", "Cachedir", "cache/phase4_showcase")
+    bn.par(d, "Bake", "toggle", "Crop", True, label="Crop Scalars")
+    bn.par(d, "Bake", "pulse", "Apply", label="Apply Showcase")
+    bn.extension(d, "demo_bake_ext", "python/demo_bake.py", "DemoBake")
+    bn.pulse_callbacks(d, {"Apply": "o.Apply()"})
     return d
