@@ -57,8 +57,15 @@ class Particles:
         show = bool(p.Cookrender.eval())
         for field in STATE:
             src = self.ownerComp.op("src_" + field)
-            src.par.top = (self.ownerComp.op("init_" + field) if reset else self.ownerComp.op(field + "_out")).path
+            if reset and getattr(self, "_resume", False):
+                src.par.top = self.ownerComp.op("resume_" + field).path
+            elif reset:
+                src.par.top = self.ownerComp.op("init_" + field).path
+            else:
+                src.par.top = self.ownerComp.op(field + "_out").path
             src.cook(force=True)
+        if reset:
+            self._resume = False
         # Bypassed branches do not pull the bus, so the fluid solver is not run once per particle TOP.
         for name, skip in (
             ("step_2d_pos", three), ("step_2d_vel", three), ("deposit_2d", three or not couple),
@@ -147,24 +154,73 @@ class Particles:
     def StateFormats(self) -> dict:
         return dict(STATE)
 
+    def ExportArray(self, field: str):
+        """Float32 state. Movie File In does not return a 32-bit EXR of these textures, so the baker
+        writes this array beside the EXR and SetInit prefers it."""
+        if field not in STATE:
+            return None
+        top = self.ownerComp.op(field + "_out")
+        if top is None:
+            return None
+        image = top.numpyArray(delayed=False)
+        if image is None:
+            return None
+        import numpy as np  # noqa: PLC0415
+
+        return np.array(image, dtype=np.float32, copy=True)
+
+    def _hold_resume(self, field: str, image) -> None:
+        name = "resume_" + field
+        top = self.ownerComp.op(name)
+        if top is None:
+            top = self.ownerComp.create(scriptTOP, name)  # noqa: F821
+            top.par.format = "rgba32float"
+            top.nodeX = -200
+            top.nodeY = 0 if field == "pos" else -120
+        top.par.outputresolution = "custom"
+        top.par.resolutionw = int(image.shape[1])
+        top.par.resolutionh = int(image.shape[0])
+        top.lock = True
+        top.copyNumpyArray(image)
+
     def SetInit(self, paths: dict | None = None) -> None:
+        self._resume = False
+        if not paths:
+            for field in STATE:
+                self.ownerComp.op("init_" + field).par.index = 0
+            return
+        root = Path(self.ownerComp.parent.sims.par.Root.eval())
+        arrays = {}
+        for field in STATE:
+            npy = Path(str(paths[field]))
+            if not npy.is_absolute():
+                npy = root / npy
+            npy = npy.with_suffix(".npy")
+            if not npy.is_file():
+                arrays = None
+                break
+            import numpy as np  # noqa: PLC0415
+
+            arrays[field] = np.ascontiguousarray(np.load(npy), dtype=np.float32)
+        if arrays:
+            for field, image in arrays.items():
+                self._hold_resume(field, image)
+            self._resume = True
+            return
         for field in STATE:
             load = self.ownerComp.op("load_" + field)
             choose = self.ownerComp.op("init_" + field)
-            if paths:
-                state = self.ownerComp.op(field + "_state")
-                load.par.file = str(paths[field])
-                load.par.playmode = "locked"
-                load.par.index.mode = ParMode.CONSTANT  # noqa: F821
-                load.par.index = 0
-                load.par.outputresolution = "custom"
-                load.par.resolutionw = state.width
-                load.par.resolutionh = state.height
-                load.par.reloadpulse.pulse()
-                load.cook(force=True)
-                choose.par.index = 1
-            else:
-                choose.par.index = 0
+            state = self.ownerComp.op(field + "_state")
+            load.par.file = str(paths[field])
+            load.par.playmode = "locked"
+            load.par.index.mode = ParMode.CONSTANT  # noqa: F821
+            load.par.index = 0
+            load.par.outputresolution = "custom"
+            load.par.resolutionw = state.width
+            load.par.resolutionh = state.height
+            load.par.reloadpulse.pulse()
+            load.cook(force=True)
+            choose.par.index = 1
 
     def Params(self) -> dict:
         p = self.ownerComp.par

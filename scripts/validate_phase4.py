@@ -417,6 +417,7 @@ def laplacian_ratio(a: np.ndarray, b: np.ndarray) -> dict:
 
 
 def main() -> int:
+    quick = "--quick" in sys.argv
     td = attach()
     report = {"cache_bytes_start": require_budget()}
     report["clean_start"] = td.run_json(CLEAN, timeout=30)
@@ -431,13 +432,13 @@ def main() -> int:
         block = {}
         for name in ("jacobi", "multigrid"):
             block[name] = td.run_json(
-                SOLVER.format(res=res, resh=res, resd=resd, solver=name, n=24),
+                SOLVER.format(res=res, resh=res, resd=resd, solver=name, n=8 if quick else 24),
                 timeout=240 if res <= 128 else 600,
             )
             block[name]["reduction"] = rms_factor(block[name]["rows"])
             td.run_json(ARM_FPS.format(sims="/sims/fluid3d", render="False", solver=name, detail=0, playback="False"), timeout=20)
             # The clock was reset inside SOLVER, so this window is a fresh rate sample, not a discarded warmup.
-            block[name]["rate"] = timeline_rate(td, 3.0 if res <= 128 else 4.0)
+            block[name]["rate"] = timeline_rate(td, 1.5 if quick else (3.0 if res <= 128 else 4.0))
             td.run_json("op('/sims/clock/tick').par.active = False\nprint('@@JSON@@' + __import__('json').dumps(1))", timeout=20)
             rate = block[name]["rate"]
             # Efficiency uses the median projection. The minimum is the pass/fail gate for the
@@ -456,7 +457,7 @@ def main() -> int:
 
     # Stability from a clean reset, multigrid, the same fire the realtime preset uses.
     stability = {}
-    for res, steps in ((128, 600), (256, 600)):
+    for res, steps in (((128, 40),) if quick else ((128, 600), (256, 600))):
         td.run_json(SOLVER.format(res=res, resh=res, resd=res, solver="multigrid", n=1), timeout=180)
         samples = []
         done = 1
@@ -479,13 +480,14 @@ def main() -> int:
 
     # 256^3 keyframe bake, cancel and resume.
     full, resume = "cache/phase4_a", "cache/phase4_b"
-    td.run_json(BAKE_SETUP.format(cache=full, frames=24, clear="True", interval=8, crop="True", substeps=2), timeout=40)
+    bake_frames = 8 if quick else 24
+    td.run_json(BAKE_SETUP.format(cache=full, frames=bake_frames, clear="True", interval=4 if quick else 8, crop="True", substeps=2), timeout=40)
     td.run_json(BAKE, timeout=30)
     report["full_bake"] = wait_bake(td, full, replay=True, batch=2)
     report["replay"] = report["full_bake"].get("replay")
-    td.run_json(BAKE_SETUP.format(cache=resume, frames=24, clear="True", interval=8, crop="True", substeps=2), timeout=40)
+    td.run_json(BAKE_SETUP.format(cache=resume, frames=bake_frames, clear="True", interval=4 if quick else 8, crop="True", substeps=2), timeout=40)
     td.run_json(BAKE, timeout=30)
-    report["cancelled"] = wait_bake(td, resume, cancel_at=12, batch=2)
+    report["cancelled"] = wait_bake(td, resume, cancel_at=4 if quick else 12, batch=2)
     td.run_json(BAKE, timeout=30)
     report["resumed"] = wait_bake(td, resume, batch=2)
     a_files = sorted(p.relative_to(ROOT / full) for p in (ROOT / full).rglob("*.exr"))
@@ -508,6 +510,35 @@ def main() -> int:
                  "storage": storage, "within_estimate": actual <= estimate}
     report["reduced_cache"] = sizes
     print("resume", report["resume_identical"], "replay", report["replay"], "sizes", sizes)
+
+    if quick:
+        # Solver ratio and the reduced-cache resume are the phase 4 checks a later phase repeats.
+        # The 600-step stability, the showcase, and the nested phase 2/3 runs stay on the full path.
+        for folder in ("phase4_a", "phase4_b", "phase4_probe"):
+            dest = ROOT / "cache" / folder
+            if dest.exists():
+                import shutil
+                shutil.rmtree(dest)
+        s128 = solver["128"]["multigrid"]["reduction"] or {}
+        s256 = solver["256"]["multigrid"]["reduction"] or {}
+        replay = report.get("replay") or {}
+        stab = report["stability"]["128"]
+        ok = (
+            (s128.get("median") or 0) >= 10
+            and (s256.get("median") or 0) >= 10
+            and (s128.get("n") or 0) >= 8
+            and (s256.get("n") or 0) >= 8
+            and stab["finite"] and stab["steps"] >= 40 and stab["max_speed"] < 15
+            and not mismatched and replay.get("diff") == 0.0
+            and sizes.get("within_estimate") is True
+        )
+        report["quick"] = True
+        report["pass"] = bool(ok)
+        REPORTS.mkdir(exist_ok=True)
+        (REPORTS / "phase4.json").write_text(json.dumps(report, indent=2) + "\n")
+        print("PASS" if ok else "FAIL")
+        td.run_json(CLEAN, timeout=30)
+        return 0 if ok else 1
 
     # 128³ cache, played back with upres. This is the 128→256-look rate (30 fps).
     td.run_json(BAKE_SETUP.format(cache="cache/phase4_probe", frames=48, clear="True", interval=0, crop="False", substeps=1).replace(

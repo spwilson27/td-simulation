@@ -102,6 +102,10 @@ class Fluid3D:
         if self.ownerComp.par.Cookrender.eval():
             self.ownerComp.op("shadow").cook()
             self.ownerComp.op("render_out").cook()
+            # One composite after the volume, so the destruction picture is not a second raymarch.
+            pieces = op("/sims/destruction/composite")  # noqa: F821
+            if pieces is not None and not pieces.bypass:
+                pieces.cook(force=True)
 
     def StateTops(self) -> dict:
         return {field: self.ownerComp.op(field + "_atlas") for field in STATE}

@@ -8,3 +8,4 @@ Backup/
 *.toe.bak
 CrashAutoSave*
 .scratch/
+reports/*.npy

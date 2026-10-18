@@ -805,16 +805,18 @@ print('@@JSON@@' + json.dumps({'status': str(b.par.Status.eval()), 'baking': boo
     raise SystemExit("group bake did not finish")
 
 
-def _exr_max_diff(a: Path, b: Path) -> float:
+def _cache_max_diff(a: Path, b: Path) -> float:
     import numpy as np
     import OpenEXR
 
     def pixels(path):
+        if path.suffix == ".npy":
+            return {"": np.load(path).astype(np.float64)}
         with OpenEXR.File(str(path)) as f:
             return {k: np.asarray(c.pixels, dtype=np.float64) for k, c in f.channels().items()}
 
     pa, pb = pixels(a), pixels(b)
-    if pa.keys() != pb.keys():
+    if pa.keys() != pb.keys() or any(pa[k].shape != pb[k].shape for k in pa):
         return float("inf")
     return max(float(np.nan_to_num(np.abs(pa[k] - pb[k]), nan=np.inf).max()) for k in pa)
 
@@ -841,7 +843,7 @@ def group_bake(td) -> dict:
     hard = []
     for rel in mismatched:
         if rel.startswith("particles/pvel/") and (ROOT / resume / rel).exists():
-            pvel_max = max(pvel_max, _exr_max_diff(ROOT / full / rel, ROOT / resume / rel))
+            pvel_max = max(pvel_max, _cache_max_diff(ROOT / full / rel, ROOT / resume / rel))
         else:
             hard.append(rel)
     stale = td.run_json(GROUP_STALE, timeout=30)

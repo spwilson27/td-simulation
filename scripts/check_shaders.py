@@ -61,6 +61,9 @@ vec4 TDDeform(vec3 p) { return vec4(p, 1.0); }
 vec4 TDWorldToProj(vec3 p) { return vec4(p, 1.0); }
 vec4 TDWorldToProj(vec4 p) { return p; }
 int TDInstanceID() { return 0; }
+in vec3 P;
+in vec3 N;
+in vec3 Cd;
 void TDWritePickingValues() {}
 #define gl_VertexIndex 0
 #define gl_InstanceIndex 0

@@ -440,6 +440,9 @@ def build(parent_path: str = "/") -> dict:
     importlib.reload(build_particles)
     build_particles.build_particles(sims, me)
     build_particles.build_demo_particles(sims, me)
+    import build_destruction  # noqa: PLC0415
+    importlib.reload(build_destruction)
+    build_destruction.build_destruction(sims, me)
     build_baker(sims)
     build_cache_reader(sims)
     for comp in sims.children:

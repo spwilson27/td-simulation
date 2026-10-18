@@ -157,7 +157,10 @@ def fields_for_frame(manifest: Manifest, frame: int, sim: str | None = None) -> 
         names = storage.get("keyframe_fields") or pool
     else:
         names = storage.get("playback_fields") or pool
-    return [name for name in names if name in pool]
+    chosen = [name for name in names if name in pool]
+    # A sim whose fields are not the fluid scalars (rigid state, particles) still stores its own
+    # fields every frame. An empty intersection would otherwise mark the frame complete with nothing saved.
+    return chosen or list(pool)
 
 
 def resolve_frame(manifest: Manifest, field: str, frame: int, sim: str | None = None) -> int:
@@ -342,9 +345,10 @@ def clear_cache(cache_dir, manifest: Manifest | None = None) -> int:
                 d = root / sim / name
                 if not d.is_dir():
                     continue
-                for f in d.glob(f"{name}.*.exr"):
-                    f.unlink()
-                    removed += 1
+                for pattern in (f"{name}.*.exr", f"{name}.*.npy"):
+                    for f in d.glob(pattern):
+                        f.unlink()
+                        removed += 1
                 if not any(d.iterdir()):
                     d.rmdir()
             sim_dir = root / sim
@@ -365,9 +369,10 @@ def clear_cache(cache_dir, manifest: Manifest | None = None) -> int:
         d = root / name
         if not d.is_dir():
             continue
-        for f in d.glob(f"{name}.*.exr"):
-            f.unlink()
-            removed += 1
+        for pattern in (f"{name}.*.exr", f"{name}.*.npy"):
+            for f in d.glob(pattern):
+                f.unlink()
+                removed += 1
         if not any(d.iterdir()):
             d.rmdir()
     mp = manifest_path(root)

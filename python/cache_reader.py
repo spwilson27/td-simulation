@@ -225,9 +225,24 @@ class CacheReader:
 
     def _ensure_crop(self, field: str, res, fmt: str) -> None:
         comp = self.ownerComp
-        if comp.op(field + "_play") is not None:
-            return
         vol = [int(res[0]), int(res[1]), int(res[2])]
+        play = comp.op(field + "_play")
+        if play is not None:
+            # The expand target is the full volume. A later cache can be a different grid;
+            # leaving the first grid here made a 256³ replay compare a 128³ picture.
+            play.par.format = fmt
+            play.par.resolutionw = vol[0]
+            play.par.resolutionh = vol[1]
+            play.par.customdepth = vol[2]
+            for tag in "ab":
+                exp = comp.op(f"{field}_exp{tag}")
+                if exp is None:
+                    continue
+                exp.par.format = fmt
+                exp.par.resolutionw = vol[0]
+                exp.par.resolutionh = vol[1]
+                exp.par.customdepth = vol[2]
+            return
         decoders = []
         for which, tag in ((0, "a"), (1, "b")):
             dec = comp.create(glslTOP, f"{field}_dec{tag}")

@@ -516,6 +516,25 @@ The bake projection is scored on every step, not on a subset of the sample. On t
 | bake | 256³ | multigrid | 24 | 14 | 40 | 4 | 2 |
 | high | 384³ | multigrid | 16 | 14 | 40 | 4 | 1 |
 
+## Destruction
+
+`/sims/destruction` fractures a box, a sphere, or a SOP mesh into convex pieces and steps them as rigid bodies. `Arm()` builds the fracture, switches the 3D fluid to the realtime scene (64³, four multigrid V-cycles, 480×270 volume), publishes the pieces as moving obstacles on the 2D and 3D buses, and emits debris into `/sims/particles` plus a dust source on the 3D bus. Piece-piece contacts in that scene are bounding spheres. `Release()` takes those publishes down.
+
+```python
+d = op('/sims/destruction')
+d.par.Pieces = 100          # realtime wall; the fracture itself is deterministic for Seed
+d.par.Pattern = 'clustered' # or 'uniform' or 'radial'
+d.par.Breakmode = 'impact'  # or 'frame', 'explosion', 'pressure'
+d.Arm()
+op.simclock.par.Sims = '/sims/destruction /sims/fluid3d /sims/particles'
+```
+
+`Breakmode` `impact` is a projectile. `frame` and `explosion` release the glue at `Breakframe`. `pressure` breaks a glue whose midpoint samples bus pressure above `Pressurethresh`. Interior faces are a separate material on the instanced mesh (`pieces_render`). The bus obstacle for each piece is its oriented box, the same signed-distance-plus-velocity contract as the demo sphere.
+
+A group bake is `/sims/destruction /sims/fluid3d /sims/particles`. Body state and particle state are float32 textures; the baker writes a `.npy` next to each EXR because Movie File In does not return a 32-bit script-TOP EXR, and resume loads that array. The checked bake is 96³, six frames, every frame stored. `scripts/validate_phase5.py` is the gate.
+
+On this machine the Bullet Solver COMP can be created, and cooking it does not integrate. The rigid step is the numpy solver in `python/rigidbody.py`.
+
 ## Known limitations
 
 **Open sides.** In 2D the pressure solve still treats every edge as a wall, and an open side only adds extra decay across `Spongewidth`. A pressure of 0 past the edge was unstable on that collocated grid. In 3D an open side is a Dirichlet pressure boundary (ghost pressure 0) as well as the absorbing band. That is what makes the pressure problem solvable when combustion adds divergence. The realtime preset stays on Jacobi and still has to hold 30 fps.
@@ -532,12 +551,13 @@ The bake projection is scored on every step, not on a subset of the sample. On t
 
 **Async Save can report complete early.** It returns before the file is necessarily on disk, and the baker decides `complete` as soon as the last `save` returns. Leave it off when the manifest flag has to match the directory.
 
+**Destruction obstacles are oriented boxes.** The bus field is the piece's local AABB, rigidly transformed, not the Voronoi mesh. Corners of the true mesh can sit outside that box. The realtime wall uses 4 Jacobi sweeps so 100 pieces plus the 128³ fluid stay above 30 fps. The checked group bake is 96³ for six frames; a 256³ cancel-and-resume of the same group did not fit beside the other phase checks. Fluid drag on the pieces defaults off.
+
 ## Roadmap
 
 Later phases add the other solvers, all of them publishing onto this bus:
 
-- Destruction: Voronoi fracture in pure Python, rigid-body dynamics in Bullet. The pieces become moving obstacles on this bus, and the particle system is what turns the debris into dust.
-- FLIP liquids. Particle-to-grid will gather binned particles, because float image atomics are unavailable. The phase 3 splat is the additive-blend half of that; a liquid needs the gather.
+- FLIP liquids. Particle-to-grid will gather binned particles, because float image atomics are unavailable. The phase 3 splat is the additive-blend half of that; a liquid needs the gather. Destruction pieces are already moving obstacles on the bus (signed distance plus rigid velocity), which is the obstacle contract a liquid should sample.
 
 ## Benchmarks
 

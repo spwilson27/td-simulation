@@ -217,11 +217,20 @@ def build_particles(sims, bn):
 
     def integrate(dim, write, inputs, cell, col, row):
         shader = src["integrate2d"] if dim == "2d" else src["integrate3d"]
+        uniforms = _state_uniforms(write, cell) + [("uBurst", (1 if dim == "3d" else 0, 0, 0, 0))]
         return particle_glsl(bn, f, f"step_{dim}_{'pos' if write == 0 else 'vel'}", shader, inputs,
-                             _state_uniforms(write, cell), col, row)
+                             uniforms, col, row)
 
+    for name in ("burst_pos", "burst_vel"):
+        burst = bn.place(f.create(td.scriptTOP, name), 4, 6 if name.endswith("pos") else 7)
+        burst.par.outputresolution = "custom"
+        burst.par.resolutionw.expr = P + "Resx"
+        burst.par.resolutionh.expr = P + "Resy"
+        burst.par.format = "rgba32float"
+        burst.lock = True
     ins2 = [loops["pos"], loops["pvel"], bus2["vel"], bus2["scalars"], bus2["obstacles"]]
-    ins3 = [loops["pos"], loops["pvel"], bus3["vel"], bus3["scalars"], bus3["obstacles"]]
+    # Burst is wired before the volumes so sTD2DInputs[2] and [3] are the burst, not the bus.
+    ins3 = [loops["pos"], loops["pvel"], f.op("burst_pos"), f.op("burst_vel"), bus3["vel"], bus3["scalars"], bus3["obstacles"]]
     pos2 = integrate("2d", 0, ins2, CELL2, 6, 0)
     vel2 = integrate("2d", 1, ins2, CELL2, 6, 1)
     pos3 = integrate("3d", 0, ins3, CELL3, 7, 0)

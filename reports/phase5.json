@@ -1,0 +1,274 @@
+{
+  "cache_bytes_start": 3829063857,
+  "fracture": {
+    "pieces": 16,
+    "volume_error": 0.0,
+    "open_edges": 0,
+    "overlap_samples": 0,
+    "deterministic": true,
+    "sphere_volume_error": 1.4048444144755062e-16,
+    "hull_volume_error": 2.05596856412066e-16,
+    "thousand_pieces": 1000,
+    "thousand_volume_error": 3.7007434154171886e-16
+  },
+  "physics": {
+    "rest_y": 0.09979996885571912,
+    "rest_speed": 0.023787132106092686,
+    "energy_ratio": 1.0,
+    "drop_miny": -0.0002000311442808822,
+    "stack_y": [
+      0.09979996885571911,
+      0.2995997289021145,
+      0.49939938628428165
+    ],
+    "stack_xz": [
+      0.0001034831738524025,
+      0.00048106340997103753,
+      0.0008748384051818091
+    ],
+    "stack_pen": 0.00020012457712353937,
+    "stack_miny": -0.00020003114428089608
+  },
+  "bullet": {
+    "types": [
+      "bulletsolverCHOP",
+      "bulletsolverCOMP"
+    ],
+    "created": true,
+    "y0": 15.0,
+    "y1": 15.0,
+    "moved": false,
+    "note": "cook() does not advance Bullet. Driving the timeline from a script wedged the process, so Bullet is not the bake solver."
+  },
+  "coupling": {
+    "sdf": -0.16437500715255737,
+    "smoke": 0.0,
+    "obs_vel": [
+      0.6000000238418579,
+      0.0,
+      0.0
+    ],
+    "near_vel": [
+      0.53369140625,
+      0.047149658203125,
+      0.047149658203125
+    ],
+    "body_vel": [
+      0.6000000238418579,
+      0.0,
+      0.0
+    ],
+    "finite": true
+  },
+  "break": {
+    "pieces": 100,
+    "glues": 1205,
+    "volume": 0.1600000000000001,
+    "source": 0.16000000000000003,
+    "broken": 99,
+    "miny": -6.2489438068524805e-09,
+    "alive": 469,
+    "dust_max": 8.97813606262207,
+    "bodies": 101,
+    "scene": {
+      "res": [
+        64,
+        64,
+        64
+      ],
+      "solver": "multigrid",
+      "vcycles": 4,
+      "smooth": 8,
+      "coarse": 16,
+      "raysteps": 6,
+      "shadowsteps": 2,
+      "render": [
+        480,
+        270
+      ],
+      "piece_render": [
+        480,
+        270
+      ],
+      "cookrender_fluid": true,
+      "cookrender_pieces": true,
+      "detail": 0.0,
+      "mesh_contacts": false,
+      "pieces": 100,
+      "iterations": 2,
+      "sims": "/sims/destruction /sims/fluid3d /sims/particles",
+      "bypass": {
+        "render_out": false,
+        "shadow": false,
+        "pieces_render": false,
+        "composite": false,
+        "dust3d": false
+      }
+    },
+    "pictures": {
+      "pieces": {
+        "mean_luma": 0.016208412125706673,
+        "std_luma": 0.057481154799461365,
+        "blown": 0.0,
+        "coverage": 1.0,
+        "max": 0.5498046875,
+        "min_alpha": 1.0
+      },
+      "smoke": {
+        "mean_luma": 0.02847178280353546,
+        "std_luma": 0.0548199862241745,
+        "blown": 0.0,
+        "coverage": 1.0,
+        "max": 0.5498046875,
+        "min_alpha": 1.0
+      }
+    }
+  },
+  "realtime": {
+    "steps": 169,
+    "frames": 169,
+    "seconds": 3.0,
+    "fps": 56.333333333333336,
+    "ms": 17.75147928994083,
+    "scene": {
+      "res": [
+        64,
+        64,
+        64
+      ],
+      "solver": "multigrid",
+      "vcycles": 4,
+      "smooth": 8,
+      "coarse": 16,
+      "raysteps": 6,
+      "shadowsteps": 2,
+      "render": [
+        480,
+        270
+      ],
+      "piece_render": [
+        480,
+        270
+      ],
+      "cookrender_fluid": true,
+      "cookrender_pieces": true,
+      "detail": 0.0,
+      "mesh_contacts": false,
+      "pieces": 100,
+      "iterations": 2,
+      "sims": "/sims/destruction /sims/fluid3d /sims/particles",
+      "bypass": {
+        "render_out": false,
+        "shadow": false,
+        "pieces_render": false,
+        "composite": false,
+        "dust3d": false
+      }
+    },
+    "divergence": {
+      "rms": 0.027285298785164714,
+      "max_abs": 0.7176513671875,
+      "finite": true
+    }
+  },
+  "divergence": {
+    "rms": 0.027285298785164714,
+    "max_abs": 0.7176513671875,
+    "finite": true
+  },
+  "pictures": {
+    "pieces": {
+      "mean_luma": 0.016208412125706673,
+      "std_luma": 0.057481154799461365,
+      "blown": 0.0,
+      "coverage": 1.0,
+      "max": 0.5498046875,
+      "min_alpha": 1.0
+    },
+    "smoke": {
+      "mean_luma": 0.02847178280353546,
+      "std_luma": 0.0548199862241745,
+      "blown": 0.0,
+      "coverage": 1.0,
+      "max": 0.5498046875,
+      "min_alpha": 1.0
+    }
+  },
+  "bake": {
+    "full": {
+      "status": "complete: 6 frames in 0.6s",
+      "baking": false,
+      "frame": 6
+    },
+    "resumed": {
+      "status": "complete: 3 frames in 0.3s",
+      "baking": false,
+      "frame": 6
+    },
+    "files": 66,
+    "mismatched": [],
+    "identical": true
+  },
+  "showcase_bake": {
+    "pieces": 1000,
+    "baking": true,
+    "status": "baking from frame 1",
+    "pumped": {
+      "baking": false,
+      "status": "complete: 180 frames in 58.9s",
+      "frame": 180
+    }
+  },
+  "showcase_picture": {
+    "frames": [
+      31,
+      91,
+      151
+    ],
+    "paths": [
+      "/Users/mrwilson/software/td-simulations/reports/phase5_showcase_00031.npy",
+      "/Users/mrwilson/software/td-simulations/reports/phase5_showcase_00091.npy",
+      "/Users/mrwilson/software/td-simulations/reports/phase5_showcase_00151.npy"
+    ]
+  },
+  "showcase": {
+    "frames_written": 180,
+    "pieces": 1000,
+    "fluid_res": [
+      128,
+      128,
+      128
+    ],
+    "bytes": 863082203,
+    "png": "reports/phase5_showcase.png",
+    "sheet": "reports/phase5_showcase_sheet.png"
+  },
+  "showcase_bytes": 863082203,
+  "showcase_kept": true,
+  "pieces_png": {
+    "path": "reports/phase5_pieces.png",
+    "mean_luma": 0.016093789270152505,
+    "std_luma": 0.05720695308704251,
+    "max_luma": 0.4020023529411765,
+    "min_alpha": 1.0,
+    "blown": 0.0,
+    "coverage": 1.0
+  },
+  "smoke_png": {
+    "path": "reports/phase5_smoke.png",
+    "mean_luma": 0.027928840656015492,
+    "std_luma": 0.05442082007872623,
+    "max_luma": 0.44964313725490196,
+    "min_alpha": 1.0,
+    "blown": 0.0,
+    "coverage": 1.0
+  },
+  "bake_check": 0,
+  "phase2": 0,
+  "phase3": 0,
+  "phase4": 0,
+  "shaders": 0,
+  "pytest": 0,
+  "cache_bytes_end": 3829063857,
+  "pass": true
+}

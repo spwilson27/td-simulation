@@ -1,3 +1,5 @@
+uniform vec4 uBurst; // x > 0.5: inputs 2 and 3 are a one-step debris spawn (3D step only)
+
 // Particle advance. The parent shader defines particleDim(), sampleVel(), sampleScalars(), sampleObs()
 // before including this file. sampleObs() is (signed distance, velocity xyz).
 //
@@ -174,7 +176,23 @@ vec4 particleOutput(ivec2 coord)
 	float age = posTex.w;
 	float life = velTex.w;
 	bool tracer = uEmit.x > 4.5;
-	if (life <= 0.0)
+	bool fromBurst = false;
+	// Only the 3D step sets uBurst. Its inputs 2 and 3 are the burst textures, wired ahead of the
+	// bus volumes so they cannot be confused with a velocity field.
+	if (life <= 0.0 && uBurst.x > 0.5)
+	{
+		vec4 burstP = texelFetch(sTD2DInputs[2], coord, 0);
+		if (burstP.w > 0.0)
+		{
+			vec4 burstV = texelFetch(sTD2DInputs[3], coord, 0);
+			pos = burstP.xyz;
+			vel = burstV.xyz;
+			age = 0.0;
+			life = burstP.w;
+			fromBurst = true;
+		}
+	}
+	if (life <= 0.0 && !fromBurst)
 	{
 		if (tracer)
 			return uWrite.x < 0.5 ? vec4(pos, age) : vec4(vel, life);

@@ -114,9 +114,13 @@ class Baker:
         sims = self._sims()
         members = {sim.name: self._member_record(sim) for sim in sims}
         first = members[sims[0].name]
+        extra = {}
+        storage = self.Storage()
+        if storage:
+            extra["storage"] = storage
         return self.cache.Manifest(
             sim="group", params={name: info["params"] for name, info in members.items()},
-            fields={}, res=first["res"], bounds=first["bounds"], members=members, **common,
+            fields={}, res=first["res"], bounds=first["bounds"], members=members, extra=extra, **common,
         )
 
     def CacheStatus(self) -> str:
@@ -163,12 +167,21 @@ class Baker:
             clock.par.Sims = self._group_text()
         if resume > start:
             if manifest.members:
-                for one in self._sims():
-                    info = manifest.members[one.name]
-                    one.SetInit({f: self.cache.frame_path(cache_dir, f, resume - 1, one.name) for f in info["fields"]})
-                self._show_loaded_fluid()
-                self._restore_coupling(resume - 1)
-                clock.RequestReset(resume)
+                origins = [self.cache.resume_state_frame(manifest, resume, one.name) for one in self._sims()]
+                if any(origin is None for origin in origins):
+                    for one in self._sims():
+                        one.SetInit(None)
+                    clock.RequestReset(start - warmup)
+                else:
+                    # Every member restarts from the earliest keyframe so a reduced fluid and a
+                    # per-frame rigid state stay on the same step. Interval 0 makes that frame resume-1.
+                    origin = min(origins)
+                    for one in self._sims():
+                        fields = self.cache.fields_for_frame(manifest, origin, one.name)
+                        one.SetInit({f: self.cache.frame_path(cache_dir, f, origin, one.name) for f in fields})
+                    self._show_loaded_fluid()
+                    self._restore_coupling(origin)
+                    clock.RequestReset(origin + 1)
             else:
                 origin = self.cache.resume_state_frame(manifest, resume)
                 if origin is None:
@@ -220,6 +233,9 @@ class Baker:
                 init = one.op("init_" + field)
                 state = one.op(field + "_state")
                 if held is None or init is None or state is None:
+                    continue
+                # 3D public outputs are selects, not Cache TOPs. Rewiring them has nothing to grab.
+                if not hasattr(held.par, "replace") or len(held.inputConnectors) == 0:
                     continue
                 held.lock = False
                 held.inputConnectors[0].disconnect()
@@ -275,21 +291,23 @@ class Baker:
                     table[row, 1] = hold.path
         op.simbus.ext.FieldBus._refresh()  # noqa: F821
 
-    def _maybe_crop(self, field: str, top, frame: int):
+    def _maybe_crop_sim(self, sim, field: str, top, frame: int):
         """Return a cropped atlas TOP for playback fields between keyframes, or `top` unchanged."""
-        storage = (self.manifest.extra or {}).get("storage") or {}
+        storage = self.cache.storage_of(self.manifest, sim.name if sim is not None else None)
         if not storage.get("crop") or field not in (storage.get("crop_fields") or []):
             return top
-        if self.cache.is_keyframe(self.manifest, frame):
+        if self.cache.is_keyframe(self.manifest, frame, sim.name if sim is not None else None):
             return top
-        sim = self.Sim
-        if not hasattr(sim, "CropAtlas") or not hasattr(sim, "OccupiedBbox"):
+        if sim is None or not hasattr(sim, "CropAtlas") or not hasattr(sim, "OccupiedBbox"):
             return top
         if getattr(self, "_bbox_frame", None) != int(frame):
             self._bbox_frame = int(frame)
             self._bbox_value = list(sim.OccupiedBbox(int(storage.get("crop_pad") or 0)))
             self.manifest.extra.setdefault("bboxes", {})[str(int(frame))] = self._bbox_value
         return sim.CropAtlas(field, self._bbox_value)
+
+    def _maybe_crop(self, field: str, top, frame: int):
+        return self._maybe_crop_sim(self.Sim, field, top, frame)
 
     def _save_frame(self) -> None:
         if not self.baking:
@@ -304,26 +322,44 @@ class Baker:
             for one in self._sims():
                 for field, top in one.StateTops().items():
                     if one.name.startswith("fluid"):
+                        held = one.op(field + "_out")
                         state = one.op(field + "_state")
-                        if state is not None:
+                        # 2D public outputs are Cache TOPs. Save the solved null and pulse the cache
+                        # so the snapshot matches the file. 3D outputs are selects of an inactive
+                        # cache; StateTops is the atlas SetInit decodes. Saving the 3D null instead
+                        # recooks the solver and writes a volume the resume path cannot decode.
+                        if state is not None and held is not None and hasattr(held.par, "replace"):
                             top = state
                     targets.append((one.name, field, top))
         else:
             targets = [(None, field, top) for field, top in self.Sim.StateTops().items()]
         needed = None if m.members else set(self.cache.fields_for_frame(m, c.frame))
         for sim_name, field, top in targets:
-            if needed is not None and field not in needed:
+            if sim_name:
+                if field not in self.cache.fields_for_frame(m, c.frame, sim_name):
+                    continue
+            elif needed is not None and field not in needed:
                 continue
-            if needed is not None:
+            if sim_name is None and needed is not None:
                 top = self._maybe_crop(field, top, c.frame)
+            elif sim_name and sim_name.startswith("fluid"):
+                top = self._maybe_crop_sim(op(f"/sims/{sim_name}"), field, top, c.frame)  # noqa: F821
             path = self.cache.frame_path(self.CacheDir, field, c.frame, sim_name)
             path.parent.mkdir(parents=True, exist_ok=True)
             top.save(str(path), asynchronous=asynchronous)
+            owner = op(f"/sims/{sim_name}") if sim_name else self.Sim  # noqa: F821
+            if owner is not None and hasattr(owner, "ExportArray"):
+                array = owner.ExportArray(field)
+                if array is not None:
+                    import numpy as np  # noqa: PLC0415
+                    np.save(path.with_suffix(".npy"), np.ascontiguousarray(array))
             if sim_name and sim_name.startswith("fluid"):
                 # save() cooks the solved null. Copy that image into the public snapshot
                 # so a replay of the snapshot matches the file.
                 held = op(f"/sims/{sim_name}/{field}_out")  # noqa: F821
-                if held is not None:
+                # 2D public outputs are Cache TOPs (replace pulse). 3D ones are selects of the
+                # cache the step already wrote; they have no replace parameter.
+                if held is not None and hasattr(held.par, "replace"):
                     held.lock = False
                     held.par.replace = True
                     held.par.replaceindex = 0

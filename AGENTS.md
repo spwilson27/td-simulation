@@ -94,6 +94,12 @@ DATs file-synced to the repo.
 - Full-weighting restriction of that residual, trilinear prolongation at gain 1, and `busCell()` at each level (so the coarse unknown sees spacing 2h) is a real V-cycle. Gain 0.05 was compensating for the stencil mismatch. Four cycles with 14 weighted-Jacobi sweeps (omega 2/3) are the bake solve. Red-black Gauss-Seidel on the read-write multipass did not converge better. A manufactured zero-mean sine mode on the numpy reference drops about 4.1× per cycle with 4 sweeps and about 9.2× per cycle with 14 (about 8.6× with a solid). On the GPU the first cycle of the live fire does most of the reduction. The old ~0.011 RMS floor was the incompatible Neumann component, not a measurement cutoff. Do not drop projections whose incoming RMS is small.
 - A cropped scalar Movie File In is left on custom resolution, and its volume decode is bypassed. The next non-cropped cache (phase 2 included) has to set that movie back to native and turn the bypass off, or the scalar replay reads the atlas instead of the volume.
 - The baker only saves the last substep of an output frame. Saving the earlier substep as well used the same filename and then overwrote it.
+- Bullet Solver COMP exists (`bulletsolverCOMP` / `bulletsolverCHOP`) and can be created under `/sims`, but `cook()` with `play` on and gravity set does not move actors (a probe actor stayed at ty 15). Turning the timeline on from inside `execute_python` wedged the scratch process. Destruction does not use Bullet. The rigid step is numpy in `python/rigidbody.py`: sequential impulses after integration, one contact per pair, glue as a velocity-averaged cluster, a sphere sweep for the projectile. Evidence is in `reports/phase5.json` (`bullet.moved` false).
+- A 32-bit EXR saved from a script TOP is not returned by Movie File In (dummy image, no error). The baker writes a `.npy` beside that EXR via `ExportArray`, and `SetInit` loads the array. Half-float fluid atlases still round-trip as EXR. Group fluid saves must be the atlas (`StateTops`), not the live 3D `*_state` null: saving the null recooks the solver and the resume decoder cannot read it.
+- Do not declare `in vec3 Cd` or `in vec3 N` in a GLSL MAT. TouchDesigner injects them; a second declaration fails compile and the viewer shows the red/blue checker. A Geometry COMP is still created with a torus POP; destroy it. Lock the piece script SOP after one cook or it rebuilds the mesh every frame.
+- A destruction reset that restores the rigid snapshot has to clear the dust texture too. Glue `_emitted` lives on the glue objects; leaving it set makes the next bake skip the dust puff, and the smoke field then diverges while the body state still matches.
+- Piece obstacles on the bus are oriented boxes (the piece's local AABB), not the exact convex SDF. The obstacle shader walks at most 8 bins. Do not put `uClock` on that shader.
+- The realtime destruction scene is 64³, four multigrid V-cycles with 8 smooth sweeps, a 480×270 volume (6 ray steps, 2 shadow steps), and bounding-sphere piece contacts. A 128³ grid plus mesh contacts does not hold 30 fps once the pieces, the volume, and the debris are drawing. Four cycles at 64³ land the divergence under the phase 4 Jacobi residual and the frame near 60 fps. The numpy tests still use mesh contacts. A projectile only hits a shard whose centre enters the projectile radius, so the bounding spheres do not shatter the wall. The 1000-piece showcase uses that broadphase at 128³, with fluid keyframes every 30 frames and cropped scalars in between, so the cache stays under 3 GB.
 
 ## Phase plan
 1. Done: clock, bus, baker, cache reader, GPU probe, 2D smoke/fire.
@@ -103,8 +109,10 @@ DATs file-synced to the repo.
    (full-weight restriction, trilinear prolongation, gain 1, weighted Jacobi). 256³ bakes with keyframe
    resume, scalar crop, and display-time upres. Realtime stays on Jacobi. The projection ratio is the RMS
    of div(u) − expansion on every step, with no incoming-RMS cutoff.
-5. Destruction: Voronoi fracture in pure Python/numpy, Bullet Solver COMP if usable on macOS else own GPU rigid
-   bodies, triggers, pieces as moving bus obstacles, debris particles and dust; baked many-piece version.
+5. Done: Voronoi fracture (numpy, volume error ~0 at 1000 pieces), numpy rigid bodies (Bullet cooks but does not
+   step on this Mac), breakable glue, pieces as moving bus obstacles, debris particles and dust. Realtime wall
+   is 100 pieces plus 128³ Jacobi; the group bake is 96³ and byte-identical across cancel/resume via `.npy` body
+   and particle state. Bus obstacles are the piece OBBs.
 6. FLIP liquids (bake + real-time 2D preview): GPU binning + gather P2G, multigrid pressure, surface (marching cubes
    or screen-space), interaction with obstacles/destruction/smoke.
 7. Cloth: XPBD on GPU, bus wind, SDF collision, tearing, optional two-way air coupling; baked high-res.
