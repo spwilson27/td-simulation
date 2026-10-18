@@ -242,8 +242,9 @@ def martin_moyce_errors(samples: list) -> dict:
 
 
 def main() -> int:
+    quick = "--quick" in sys.argv
     td = attach()
-    report = {"cache_bytes_start": require_budget()}
+    report = {"cache_bytes_start": require_budget(), "quick": quick}
     td.run_json(CLEAN, timeout=40)
 
     report["transfer"] = td.run_json(r'''
@@ -593,10 +594,12 @@ print('@@JSON@@' + json.dumps({"pos_max_abs": min(diff, diff_flip), "flipped": d
         if path.exists():
             shutil.rmtree(path)
 
-    show = ROOT / "cache" / "phase6_showcase"
-    if show.exists():
-        shutil.rmtree(show)
-    report["showcase_setup"] = td.run_json(r'''
+    # --quick skips the 180-frame showcase bake and leaves that cache in place.
+    if not quick:
+        show = ROOT / "cache" / "phase6_showcase"
+        if show.exists():
+            shutil.rmtree(show)
+        report["showcase_setup"] = td.run_json(r'''
 import json
 liq = op('/sims/liquid')
 liq.ApplyPreset('bake')
@@ -618,82 +621,82 @@ op.simclock.par.Substeps = 1
 b.Bake()
 print('@@JSON@@' + json.dumps({'baking': b.ext.Baker.baking, 'status': str(b.par.Status.eval())}))
 ''', timeout=90)
-    print("showcase arm", report["showcase_setup"])
-    report["showcase_bake"] = pump(td, None, 1, 200)
+        print("showcase arm", report["showcase_setup"])
+        report["showcase_bake"] = pump(td, None, 1, 200)
 
-    manifest_path = show / "manifest.json"
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
-    member = (manifest.get("members") or {}).get("liquid") or {}
-    params = member.get("params") or {}
-    show_bytes = sum(p.stat().st_size for p in show.rglob("*") if p.is_file()) if show.exists() else 0
-    pos_npy = show / "liquid" / "pos" / "pos.00001.npy"
-    if not pos_npy.is_file():
-        found = sorted(show.glob("liquid/pos/pos.*.npy")) if show.exists() else []
-        pos_npy = found[0] if found else pos_npy
-    active_npy = active_in_npy(pos_npy)
-    saved = []
-    for frame in (31, 91, 151):
-        shot = td.run_json(rf'''
-import json
-import numpy as np
-liq = op('/sims/liquid')
-liq.par.Cookrender = True
-liq.op('render').bypass = False
-reader = op('/sims/cache_reader')
-reader.par.Cachedir = 'cache/phase6_showcase'
-reader.par.Member = 'liquid'
-reader.par.Interpolate = False
-reader.par.Frame.expr = ''
-reader.par.Frame = {frame}
-reader.ext.CacheReader.Reload()
-picture = reader.op('pos_out')
-picture.cook(force=True)
-liq.op('src_pos').par.top = picture.path
-for name in ('keys', 'radix_scatter_5', 'bins', 'p2g', 'classify', 'phi', 'sphere', 'solids'):
-    liq.op(name).cook(force=True)
-# render is wired to phi_out, and that cache keeps the first image of a frame.
-# This call is one frame, and the live phi is what was just cooked from the cache.
-render = liq.op('render')
-render.inputConnectors[0].disconnect()
-liq.op('phi').outputConnectors[0].connect(render.inputConnectors[0])
-render.cook(force=True)
-hold = liq.op('render_out')
-hold.cook(force=True)
-image = np.asarray(hold.numpyArray(delayed=False), dtype=np.float32)
-np.save(project.folder + '/reports/phase6_showcase_{frame}.npy', image)
-alive = int(np.count_nonzero(np.asarray(picture.numpyArray(delayed=False))[..., 3] > 0))
-print('@@JSON@@' + json.dumps({{"frame": {frame}, "shape": list(image.shape),
-    "mean": float(image[..., :3].mean()), "alive": alive}}))
-''', timeout=90)
-        saved.append(shot)
-        print(" showcase frame", shot)
-    report["showcase_frames"] = {"frames": saved}
-    sheet_frames = []
-    for frame in (31, 91, 151):
-        npy = REPORTS / f"phase6_showcase_{frame}.npy"
-        png = REPORTS / f"phase6_showcase_{frame}.png"
-        if npy.is_file():
-            save_png(npy, png)
-            sheet_frames.append(np.load(npy)[..., :3])
-            npy.unlink()
-    if len(sheet_frames) == 3:
-        sheet = np.concatenate(sheet_frames, axis=1)
-        sheet_npy = REPORTS / "phase6_showcase_sheet.npy"
-        np.save(sheet_npy, np.concatenate([sheet, np.ones(sheet.shape[:2] + (1,), dtype=np.float32)], axis=2))
-        save_png(sheet_npy, REPORTS / "phase6_showcase_sheet.png")
-        sheet_npy.unlink()
-    report["showcase"] = {
-        "frames_written": int(manifest.get("frames_written") or 0),
-        "particles": params.get("particles"),
-        "active_particles": active_npy,
-        "manifest_active": params.get("active_particles"),
-        "res": params.get("res"),
-        "bytes": show_bytes,
-        "complete": bool(manifest.get("complete")),
-        "frames": ["reports/phase6_showcase_31.png", "reports/phase6_showcase_91.png",
-                   "reports/phase6_showcase_151.png", "reports/phase6_showcase_sheet.png"],
-    }
-    print("showcase", {k: report["showcase"][k] for k in ("frames_written", "active_particles", "res", "bytes")})
+        manifest_path = show / "manifest.json"
+        manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+        member = (manifest.get("members") or {}).get("liquid") or {}
+        params = member.get("params") or {}
+        show_bytes = sum(p.stat().st_size for p in show.rglob("*") if p.is_file()) if show.exists() else 0
+        pos_npy = show / "liquid" / "pos" / "pos.00001.npy"
+        if not pos_npy.is_file():
+            found = sorted(show.glob("liquid/pos/pos.*.npy")) if show.exists() else []
+            pos_npy = found[0] if found else pos_npy
+        active_npy = active_in_npy(pos_npy)
+        saved = []
+        for frame in (31, 91, 151):
+            shot = td.run_json(rf'''
+    import json
+    import numpy as np
+    liq = op('/sims/liquid')
+    liq.par.Cookrender = True
+    liq.op('render').bypass = False
+    reader = op('/sims/cache_reader')
+    reader.par.Cachedir = 'cache/phase6_showcase'
+    reader.par.Member = 'liquid'
+    reader.par.Interpolate = False
+    reader.par.Frame.expr = ''
+    reader.par.Frame = {frame}
+    reader.ext.CacheReader.Reload()
+    picture = reader.op('pos_out')
+    picture.cook(force=True)
+    liq.op('src_pos').par.top = picture.path
+    for name in ('keys', 'radix_scatter_5', 'bins', 'p2g', 'classify', 'phi', 'sphere', 'solids'):
+        liq.op(name).cook(force=True)
+    # render is wired to phi_out, and that cache keeps the first image of a frame.
+    # This call is one frame, and the live phi is what was just cooked from the cache.
+    render = liq.op('render')
+    render.inputConnectors[0].disconnect()
+    liq.op('phi').outputConnectors[0].connect(render.inputConnectors[0])
+    render.cook(force=True)
+    hold = liq.op('render_out')
+    hold.cook(force=True)
+    image = np.asarray(hold.numpyArray(delayed=False), dtype=np.float32)
+    np.save(project.folder + '/reports/phase6_showcase_{frame}.npy', image)
+    alive = int(np.count_nonzero(np.asarray(picture.numpyArray(delayed=False))[..., 3] > 0))
+    print('@@JSON@@' + json.dumps({{"frame": {frame}, "shape": list(image.shape),
+        "mean": float(image[..., :3].mean()), "alive": alive}}))
+    ''', timeout=90)
+            saved.append(shot)
+            print(" showcase frame", shot)
+        report["showcase_frames"] = {"frames": saved}
+        sheet_frames = []
+        for frame in (31, 91, 151):
+            npy = REPORTS / f"phase6_showcase_{frame}.npy"
+            png = REPORTS / f"phase6_showcase_{frame}.png"
+            if npy.is_file():
+                save_png(npy, png)
+                sheet_frames.append(np.load(npy)[..., :3])
+                npy.unlink()
+        if len(sheet_frames) == 3:
+            sheet = np.concatenate(sheet_frames, axis=1)
+            sheet_npy = REPORTS / "phase6_showcase_sheet.npy"
+            np.save(sheet_npy, np.concatenate([sheet, np.ones(sheet.shape[:2] + (1,), dtype=np.float32)], axis=2))
+            save_png(sheet_npy, REPORTS / "phase6_showcase_sheet.png")
+            sheet_npy.unlink()
+        report["showcase"] = {
+            "frames_written": int(manifest.get("frames_written") or 0),
+            "particles": params.get("particles"),
+            "active_particles": active_npy,
+            "manifest_active": params.get("active_particles"),
+            "res": params.get("res"),
+            "bytes": show_bytes,
+            "complete": bool(manifest.get("complete")),
+            "frames": ["reports/phase6_showcase_31.png", "reports/phase6_showcase_91.png",
+                       "reports/phase6_showcase_151.png", "reports/phase6_showcase_sheet.png"],
+        }
+        print("showcase", {k: report["showcase"][k] for k in ("frames_written", "active_particles", "res", "bytes")})
 
     td.run_json(CLEAN, timeout=40)
 
@@ -742,7 +745,7 @@ print('@@JSON@@' + json.dumps({{"frame": {frame}, "shape": list(image.shape),
     bypass = scene.get("bypass") or {}
     transfer = report["transfer"]
     obs = report["obstacle"]
-    show = report["showcase"]
+    show = report.get("showcase") or {}
     mm = dam["martin_moyce"]
     ok = (
         transfer["vel_max_abs"][0] < 1e-4
@@ -778,10 +781,12 @@ print('@@JSON@@' + json.dumps({{"frame": {frame}, "shape": list(image.shape),
         and not scene.get("errors")
         and report["bake"]["identical"] is True
         and report["replay"]["pos_max_abs"] < 1e-5
-        and int(show.get("frames_written") or 0) >= 180
-        and show.get("res") == [128, 128, 128]
-        and int(show.get("active_particles") or 0) >= 2000000
-        and show["bytes"] <= SHOWCASE_BUDGET
+        and (report.get("quick") or (
+            int(show.get("frames_written") or 0) >= 180
+            and show.get("res") == [128, 128, 128]
+            and int(show.get("active_particles") or 0) >= 2000000
+            and show.get("bytes", 0) <= SHOWCASE_BUDGET
+        ))
         and not dam_png["checker"]
         and not tank_png["checker"]
         and dam_png["min_alpha"] >= 0.99

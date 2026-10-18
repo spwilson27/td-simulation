@@ -1,5 +1,5 @@
 {
-  "cache_bytes_start": 4562922657,
+  "cache_bytes_start": 4905995737,
   "clean_start": {
     "sims": "/sims/fluid2d",
     "cache_bytes": 0
@@ -92,13 +92,13 @@
           "p99_min": 0.9293870688993577
         },
         "rate": {
-          "steps": 161,
-          "frames": 161,
+          "steps": 155,
+          "frames": 155,
           "seconds": 1.5,
-          "fps": 107.33333333333333,
-          "ms": 9.316770186335404
+          "fps": 103.33333333333333,
+          "ms": 9.67741935483871
         },
-        "per_ms": 0.2151554793289558
+        "per_ms": 0.2071372627080009
       },
       "multigrid": {
         "rows": [
@@ -207,13 +207,13 @@
           "p99_min": 1.3141929970436068
         },
         "rate": {
-          "steps": 31,
-          "frames": 31,
+          "steps": 28,
+          "frames": 28,
           "seconds": 1.5,
-          "fps": 20.666666666666668,
-          "ms": 48.38709677419355
+          "fps": 18.666666666666668,
+          "ms": 53.57142857142857
         },
-        "per_ms": 1.5750724596774983
+        "per_ms": 1.4226460926119342
       }
     },
     "256": {
@@ -303,13 +303,13 @@
           "p99_min": 0.4899015063166402
         },
         "rate": {
-          "steps": 24,
-          "frames": 24,
+          "steps": 23,
+          "frames": 23,
           "seconds": 1.5,
-          "fps": 16.0,
-          "ms": 62.5
+          "fps": 15.333333333333334,
+          "ms": 65.21739130434783
         },
-        "per_ms": 0.029170923357741494
+        "per_ms": 0.027955468217835597
       },
       "multigrid": {
         "rows": [
@@ -418,13 +418,13 @@
           "p99_min": 1.0441088330614698
         },
         "rate": {
-          "steps": 7,
-          "frames": 7,
+          "steps": 5,
+          "frames": 5,
           "seconds": 1.5,
-          "fps": 4.666666666666667,
-          "ms": 214.28571428571428
+          "fps": 3.3333333333333335,
+          "ms": 300.0
         },
-        "per_ms": 0.10282775733205465
+        "per_ms": 0.07344839809432475
       }
     }
   },
@@ -464,7 +464,7 @@
     }
   },
   "full_bake": {
-    "status": "complete: 8 frames in 13.7s",
+    "status": "complete: 8 frames in 14.0s",
     "baking": false,
     "frame": 8,
     "pumped": 2,
@@ -478,14 +478,14 @@
     "frame": 8
   },
   "cancelled": {
-    "status": "cancelled: 4 frames in 6.7s",
+    "status": "cancelled: 4 frames in 6.9s",
     "baking": false,
     "frame": 4,
     "pumped": 0,
     "replay": null
   },
   "resumed": {
-    "status": "complete: 7 frames in 10.3s",
+    "status": "complete: 7 frames in 10.7s",
     "baking": false,
     "frame": 8,
     "pumped": 2,

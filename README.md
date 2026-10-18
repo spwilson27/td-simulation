@@ -577,11 +577,27 @@ The picture is `render_out`, a raymarch of the liquid phi with an opaque backgro
 
 `scripts/validate_phase6.py` is the gate. The realtime preset keeps one step per frame at 33 fps.
 
+## Cloth
+
+`/sims/cloth` is a GPU XPBD cloth. Vertices live in two float textures, position with inverse mass and velocity with a tear bitmask. A step is several substeps. Each substep is one graph-coloured Gauss-Seidel iteration of stretch and shear, three Jacobi steps of isometric bending (Bergou et al. 2006, a linear stencil, so folds do not flip triangles), and long-range attachments (Kim, Chentanez, Müller 2012) that stop a vertex from sitting farther from its pins than the cloth between them. Compliance is divided by dt². Within a colour no two constraints share a vertex, so the update does not depend on thread order.
+
+Collisions are a ground plane, the 3D bus obstacle field (signed distance and rigid velocity, so destruction pieces and the liquid distance push the cloth), and vertex-vertex self-collision. Self-collision reuses a deterministic bitonic sort into spatial bins and a Jacobi push with a thickness. Aerodynamic force is pressure along the normal plus tangential drag, sampled from the bus velocity. The realtime flag hangs in a smoke jet published as a static force box. `SetUniformWind` points the same input at a uniform volume. `Couple` gathers the reaction into the bus cell that holds each vertex; the realtime preset leaves it off and the validator reports that cook. Structural edges tear, and stay torn, above `Tear` strain.
+
+`ApplyPreset('realtime')` is a 64×64 flag (4096 vertices, 8 substeps) pinned along the top edge, in front of the 48³ Jacobi smoke, both drawn at 480×270. The clock keeps one step per frame at cook rate 40. `ApplyPreset('drape')` drops a sheet on a sphere. `ApplyPreset('showcase')` is 256×256 (65536 vertices) draped for 180 frames. The group bake stores position every frame and velocity on keyframes, with a `.npy` beside the EXR. Cancel and resume match byte for byte.
+
+```python
+c = op('/sims/cloth')
+c.ApplyPreset('realtime')
+op.simclock.par.Sims = '/sims/fluid3d /sims/cloth'
+```
+
+`scripts/validate_phase7.py` is the gate. `validate_phase6.py --quick` skips that phase's showcase bake.
+
 ## Roadmap
 
-Later phases add the other solvers, all of them publishing onto this bus:
+Later phases add the scene layer on top of these solvers:
 
-- Cloth. XPBD on the GPU, wind sampled from the fluid bus, collision against rigid pieces and the liquid surface, tearing, optional two-way air coupling, baked high resolution.
+- Integration. One combined scene with smoke, particles, destruction, liquid, and cloth, plus the debt list in AGENTS.md.
 
 ## Benchmarks
 

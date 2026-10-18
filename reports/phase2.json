@@ -87,29 +87,29 @@
     "err": ""
   },
   "uncapped": {
-    "steps": 283,
-    "frames": 283,
-    "fps": 94.33
+    "steps": 271,
+    "frames": 271,
+    "fps": 90.33
   },
   "capped": {
-    "steps": 185,
-    "frames": 185,
-    "fps": 61.67
+    "steps": 183,
+    "frames": 183,
+    "fps": 61.0
   },
   "pressure": {
     "jacobi12": {
-      "seconds": 0.0034558750921860337,
+      "seconds": 0.0032403749646618962,
       "div_pre": 0.050596680492162704,
       "div_post": 0.02546836994588375
     },
     "multigrid": {
-      "seconds": 0.005728458985686302,
+      "seconds": 0.00607266603037715,
       "div_pre": 0.05933103710412979,
       "div_post": 0.03795059025287628
     }
   },
   "full_bake": {
-    "status": "complete: 24 frames in 3.8s",
+    "status": "complete: 24 frames in 3.9s",
     "baking": false,
     "frame": 24,
     "pumped": 8,
@@ -142,7 +142,7 @@
     "replay": null
   },
   "resumed": {
-    "status": "complete: 8 frames in 1.5s",
+    "status": "complete: 8 frames in 1.6s",
     "baking": false,
     "frame": 24,
     "pumped": 8,

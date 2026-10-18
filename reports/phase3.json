@@ -8,7 +8,7 @@
   "pytest": {
     "returncode": 0,
     "tail": [
-      "185 passed in 20.51s"
+      "210 passed in 22.54s"
     ]
   },
   "advection": {
@@ -40,58 +40,58 @@
     "finite": true
   },
   "coupling": {
-    "mean_diff_default": 0.006439968012273312,
-    "mean_diff_strong": 0.01220144797116518,
-    "max_off": 1.6754099130630493,
-    "max_default": 1.7067300081253052,
-    "max_strong": 1.737879991531372,
+    "mean_diff_default": 0.006601292174309492,
+    "mean_diff_strong": 0.012394287623465061,
+    "max_off": 2.049870014190674,
+    "max_default": 1.984299898147583,
+    "max_strong": 1.9057799577713013,
     "finite": true,
-    "speed_ratio": 1.018693989344372,
+    "speed_ratio": 0.9680125492888977,
     "off": {
       "finite": true,
-      "mean": 0.3600068688392639,
-      "max": 1.6754099130630493,
-      "force_max": 0.8723999857902527
+      "mean": 0.3477690517902374,
+      "max": 2.049870014190674,
+      "force_max": 0.789900004863739
     },
     "default": {
       "finite": true,
-      "mean": 0.3600112497806549,
-      "max": 1.7067300081253052,
-      "force_max": 0.0010989999864250422
+      "mean": 0.3477364182472229,
+      "max": 1.984299898147583,
+      "force_max": 0.0015450000064447522
     },
     "strong": {
       "finite": true,
-      "mean": 0.3600158989429474,
-      "max": 1.737879991531372,
-      "force_max": 0.010699999518692493
+      "mean": 0.34771883487701416,
+      "max": 1.9057799577713013,
+      "force_max": 0.015008999966084957
     }
   },
   "render2d": {
     "err": "",
     "step": 139,
     "beauty": {
-      "lit": 0.09585857391357422,
-      "sat": 0.05373668670654297,
+      "lit": 0.05131721496582031,
+      "sat": 0.03867626190185547,
       "alpha_min": 0.0,
-      "max": 13.515625
+      "max": 17.03125
     },
     "picture": {
-      "lit": 0.5111923217773438,
-      "sat": 0.06325912475585938,
+      "lit": 0.37807655334472656,
+      "sat": 0.042205810546875,
       "alpha_min": 1.0,
       "max": 1.0
     },
     "fluid": {
-      "lit": 0.48484325408935547,
-      "sat": 0.020097732543945312,
+      "lit": 0.3461027145385742,
+      "sat": 0.01595306396484375,
       "alpha_min": 1.0,
-      "max": 1.712890625
+      "max": 1.677734375
     },
     "plume": {
-      "centroid_y": 0.9508614020006158,
+      "centroid_y": 0.7653439757533612,
       "emitter_y": 0.22,
-      "inside": 0.9058647962990598,
-      "lit": 100515
+      "inside": 0.5818435235086415,
+      "lit": 53810
     }
   },
   "render3d": {
@@ -118,14 +118,14 @@
     "plume": null
   },
   "plume": {
-    "centroid_y": 0.9508614020006158,
+    "centroid_y": 0.7653439757533612,
     "emitter_y": 0.22,
-    "inside": 0.9058647962990598,
-    "lit": 100515
+    "inside": 0.5818435235086415,
+    "lit": 53810
   },
   "png_embers": {
-    "lit": 0.5110664367675781,
-    "sat": 0.06325912475585938,
+    "lit": 0.3780546188354492,
+    "sat": 0.042205810546875,
     "alpha_one": true,
     "pixels": 1048576
   },
@@ -142,21 +142,21 @@
     "steps_match_frames": true
   },
   "fps_alone_rendered": {
-    "steps": 365,
-    "frames": 365,
-    "fps": 121.67,
+    "steps": 366,
+    "frames": 366,
+    "fps": 122.0,
     "steps_match_frames": true
   },
   "fps_with_2d": {
-    "steps": 146,
-    "frames": 146,
-    "fps": 48.67,
+    "steps": 141,
+    "frames": 141,
+    "fps": 47.0,
     "steps_match_frames": true
   },
   "fps_with_3d": {
-    "steps": 270,
-    "frames": 270,
-    "fps": 90.0,
+    "steps": 258,
+    "frames": 258,
+    "fps": 86.0,
     "steps_match_frames": true,
     "note": "1M particles advected by the 128^3 fluid while the volume render cooks. The 3D atlas splat is correct but too heavy to include in this rate."
   },
@@ -205,7 +205,7 @@
   },
   "group": {
     "full": {
-      "status": "complete: 40 frames in 4.9s",
+      "status": "complete: 40 frames in 5.0s",
       "baking": false,
       "frame": 40
     },

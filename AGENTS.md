@@ -104,6 +104,11 @@ DATs file-synced to the repo.
 - A destruction reset that restores the rigid snapshot has to clear the dust texture too. Glue `_emitted` lives on the glue objects; leaving it set makes the next bake skip the dust puff, and the smoke field then diverges while the body state still matches.
 - Piece obstacles on the bus are oriented boxes (the piece's local AABB), not the exact convex SDF. The obstacle shader walks at most 8 bins. Do not put `uClock` on that shader.
 - The realtime destruction scene is 64³, four multigrid V-cycles with 8 smooth sweeps, a 480×270 volume (6 ray steps, 2 shadow steps), and bounding-sphere piece contacts. A 128³ grid plus mesh contacts does not hold 30 fps once the pieces, the volume, and the debris are drawing. Four cycles at 64³ land the divergence under the phase 4 Jacobi residual and the frame near 60 fps. The numpy tests still use mesh contacts. A projectile only hits a shard whose centre enters the projectile radius, so the bounding spheres do not shatter the wall. The 1000-piece showcase uses that broadphase at 128³, with fluid keyframes every 30 frames and cropped scalars in between, so the cache stays under 3 GB.
+- A cloth step that reports velocity from the last substep can reach the same positions as a reloaded step and
+  still save a different velocity: the reload takes another path through the substeps. Lock the frame-start
+  position after `BeginStep` cooks it, and store `(end - start) / frame dt`. Both the continuous bake and the
+  resume then write the same velocity. A select TOP left unlocked will recook onto the position the step just
+  wrote and the velocity collapses.
 - FLIP particle-to-grid is a bitonic sort of `(cell id, particle index)` followed by a per-cell gather. Float addition order is then the particle index order, so a resumed bake matches. Renormalising the free-surface residual onto the coarse grid amplifies the interface and the V-cycle diverges above 16³; leaving those weights un-normalised stays stable, and a short fine-grid Jacobi polish after the V-cycle is what keeps a tank from draining into a puddle. The liquid must not sample the obstacle merge it publishes into: that phi would become a solid on the next step. A time-varying emitter left on the bus makes a replay from a saved particle state disagree with the live step, because the force depends on the clock. A Cache TOP still stores only the first image of a TouchDesigner frame, so a picture saved after several scripted ticks has to be snapped in a later call, and the baker's preview is a locked null cooked inside the step.
 
 ## Phase plan
@@ -118,11 +123,21 @@ DATs file-synced to the repo.
    step on this Mac), breakable glue, pieces as moving bus obstacles, debris particles and dust. Realtime wall
    is 100 pieces plus 128³ Jacobi; the group bake is 96³ and byte-identical across cancel/resume via `.npy` body
    and particle state. Bus obstacles are the piece OBBs.
-6. In progress: GPU FLIP on the 3D bus. The live sort is a stable 6-digit radix (cell id, then particle index); `SortAgrees` checks it against a full bitonic sort. Free-surface pressure is MGPCG (CG on the fine grid, one symmetric V-cycle per iteration, air Dirichlet, clamp-to-edge prolongation). Each step runs 8 warm-started iterations; alpha and beta stay in 1×1 textures, and the residual ratio is read once. A still 64³ tank holds its height over 120 steps (95th percentile 0.414 m to 0.415 m, divergence RMS about 7e-5, max speed about 0.0005 m/s). The dam toe stays within 22% of the Martin & Moyce Z(T) line. 64³ realtime still misses a 30 ms frame (79 steps against 187 frames in 3 s). The 48³ preset holds 124,250 live particles with the surface on. A synced splash step was sort 1.2 ms, P2G 1.8 ms, divergence 0.8 ms, MGPCG 13.1 ms (8 iterations), G2P 1.3 ms, render 0.7 ms. At a 33 fps cook rate both validation windows were 100 steps and 100 frames. The 180-frame showcase is 128³ with 2,018,940 live particles.
-7. Cloth: XPBD on GPU, bus wind, SDF collision, tearing, optional two-way air coupling; baked high-res.
+6. Done: GPU FLIP on the 3D bus. The live sort is a stable 6-digit radix (cell id, then particle index); `SortAgrees` checks it against a full bitonic sort. Free-surface pressure is MGPCG (CG on the fine grid, one symmetric V-cycle per iteration, air Dirichlet, clamp-to-edge prolongation). Each step runs 8 warm-started iterations; alpha and beta stay in 1×1 textures, and the residual ratio is read once. A still 64³ tank holds its height over 120 steps (95th percentile 0.414 m to 0.415 m, divergence RMS about 7e-5, max speed about 0.0005 m/s). The dam toe stays within 22% of the Martin & Moyce Z(T) line. 64³ realtime still misses a 30 ms frame (79 steps against 187 frames in 3 s). The 48³ preset holds 124,250 live particles with the surface on. A synced splash step was sort 1.2 ms, P2G 1.8 ms, divergence 0.8 ms, MGPCG 13.1 ms (8 iterations), G2P 1.3 ms, render 0.7 ms. At a 33 fps cook rate both validation windows were 100 steps and 100 frames. The 180-frame showcase is 128³ with 2,018,940 live particles.
+7. Done: GPU XPBD cloth. Each substep is one stretch/shear Gauss-Seidel iteration, eight Jacobi steps of
+   Bergou isometric bending, and two long-range attachment passes (Kim, Chentanez, Müller
+   2012: a vertex cannot sit farther from its pins than the rest geodesic). The realtime flag is 64×64,
+   8 substeps, pinned on the top edge, in a smoke jet, at cook rate 33. A settled 64×64 and 256×256 sheet
+   stay under 2% edge strain. The cloth vertex shader writes a real window z; a constant `z * 0.5` makes
+   overlapping folds z-fight and the picture looks speckled. A 256×256 showcase (65536 vertices, 180 frames)
+   is byte-identical across cancel/resume. Frame-start positions are locked and the stored velocity is the
+   frame average, which is what makes resume match. The fan that feeds the flag is a static force box; it
+   must not sample the fluid velocity or the publish cooks in a cycle and the next cloth step collapses.
 8. Integration: scene/preset system, cross-camp showcase scenes, performance pass, render/export outputs, docs.
    Phase 3 debt to clear here: the deterministic 2D particle splat (`shaders/particles/splat_sum.glsl`) sums all
-   particles in ONE workgroup into a 32×32 grid (coarse coupling, ~45 fps with the 2D fluid); move it to a full-res
+   particles in ONE workgroup into a 32×32 grid (coarse coupling, ~45 fps with the 2D fluid in a fresh session, but
+   it fell to ~28 fps, under the 30 fps gate, once when run nested inside validate_phase7 → validate_phase5 --quick,
+   so this gate has no margin); move it to a full-res
    multi-workgroup fixed-point sum (probe integer image atomics on r32i, else per-tile shared sums + a reduce pass).
    Particle pos/vel are snapped to 1e-4 under bus advection (`step.glsl`) to hide a sub-ulp difference in the first
    resumed fluid sample; a coupled group-bake resume still differs by one snap step in a few pvel values
@@ -137,3 +152,6 @@ DATs file-synced to the repo.
    is drawn from that step's phi, not from a GLSL TOP that may already have cooked. Two-way push on rigid
    pieces is not wired; point `extra_solids` at the destruction obstacle TOP for one-way coupling. APIC is
    in `python/flip.py` only.
+   Phase 7 debt: two-way coupling stays off in the realtime preset. The gather is one hash bin per bus cell
+   (not a 27-neighbour walk) and its cook cost is reported; it still did not fit the flag frame. The cloth
+   does not publish a thin SDF. The stored velocity is the frame average, not the last substep.

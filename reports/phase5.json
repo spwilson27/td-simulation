@@ -1,5 +1,5 @@
 {
-  "cache_bytes_start": 4562922657,
+  "cache_bytes_start": 4905995737,
   "fracture": {
     "pieces": 16,
     "volume_error": 0.0,
@@ -125,11 +125,11 @@
     }
   },
   "realtime": {
-    "steps": 166,
-    "frames": 166,
+    "steps": 160,
+    "frames": 160,
     "seconds": 3.0,
-    "fps": 55.333333333333336,
-    "ms": 18.072289156626507,
+    "fps": 53.333333333333336,
+    "ms": 18.75,
     "scene": {
       "res": [
         64,
@@ -166,14 +166,14 @@
       }
     },
     "divergence": {
-      "rms": 0.028916804886721766,
-      "max_abs": 0.7325439453125,
+      "rms": 0.02756658680195361,
+      "max_abs": 0.7188720703125,
       "finite": true
     }
   },
   "divergence": {
-    "rms": 0.028916804886721766,
-    "max_abs": 0.7325439453125,
+    "rms": 0.02756658680195361,
+    "max_abs": 0.7188720703125,
     "finite": true
   },
   "pictures": {
@@ -234,6 +234,6 @@
   "phase4": 0,
   "shaders": 0,
   "pytest": 0,
-  "cache_bytes_end": 4562922657,
+  "cache_bytes_end": 4905995737,
   "pass": true
 }

@@ -1,5 +1,6 @@
 {
-  "cache_bytes_start": 4562922657,
+  "cache_bytes_start": 4905995737,
+  "quick": true,
   "transfer": {
     "active": 42875,
     "vel_max_abs": [
@@ -420,12 +421,12 @@
     "agrees": true
   },
   "stages": {
-    "sort": 1.4,
-    "p2g": 1.81,
+    "sort": 1.36,
+    "p2g": 2.02,
     "divergence": 0.82,
-    "solve": 13.37,
-    "g2p": 1.29,
-    "render": 0.68,
+    "solve": 13.5,
+    "g2p": 1.3,
+    "render": 0.74,
     "iters": 8
   },
   "bake_setup": {
@@ -464,71 +465,6 @@
     "pos_max_abs": 0.0,
     "flipped": false
   },
-  "showcase_setup": {
-    "baking": true,
-    "status": "baking from frame 1"
-  },
-  "showcase_bake": {
-    "baking": false,
-    "status": "complete: 180 frames in 54.9s",
-    "frame": 180
-  },
-  "showcase_frames": {
-    "frames": [
-      {
-        "frame": 31,
-        "shape": [
-          360,
-          640,
-          4
-        ],
-        "mean": 0.09120349586009979,
-        "alive": 2018940
-      },
-      {
-        "frame": 91,
-        "shape": [
-          360,
-          640,
-          4
-        ],
-        "mean": 0.08002013713121414,
-        "alive": 2018940
-      },
-      {
-        "frame": 151,
-        "shape": [
-          360,
-          640,
-          4
-        ],
-        "mean": 0.07714422792196274,
-        "alive": 2018940
-      }
-    ]
-  },
-  "showcase": {
-    "frames_written": 180,
-    "particles": [
-      2048,
-      1024
-    ],
-    "active_particles": 2018940,
-    "manifest_active": 2018940,
-    "res": [
-      128,
-      128,
-      128
-    ],
-    "bytes": 731845733,
-    "complete": true,
-    "frames": [
-      "reports/phase6_showcase_31.png",
-      "reports/phase6_showcase_91.png",
-      "reports/phase6_showcase_151.png",
-      "reports/phase6_showcase_sheet.png"
-    ]
-  },
   "png_diff": 0.028418644484728497,
   "dam_png": {
     "path": "reports/phase6_dam.png",
@@ -557,6 +493,6 @@
   "phase5": 0,
   "shaders": 0,
   "pytest": 0,
-  "cache_bytes_end": 4562922657,
+  "cache_bytes_end": 4905995737,
   "pass": true
 }

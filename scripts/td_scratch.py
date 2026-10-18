@@ -121,17 +121,30 @@ class ScratchTD:
             return False
         return True
 
+    def group_alive(self) -> bool:
+        try:
+            os.killpg(self.pid, 0)
+        except OSError:
+            return False
+        return True
+
     def kill(self) -> None:
+        # Wait for the whole process group: a lingering helper still holds the GPU and
+        # slows the next session's frame-rate gates.
         try:
             os.killpg(self.pid, signal.SIGTERM)
         except OSError:
             return
         for _ in range(40):
-            if not self.alive():
+            if not self.group_alive():
                 return
             time.sleep(0.25)
         with contextlib.suppress(OSError):
             os.killpg(self.pid, signal.SIGKILL)
+        for _ in range(40):
+            if not self.group_alive():
+                return
+            time.sleep(0.25)
 
 
 def launch(work: Path, seed: Path | None = None, timeout: float = 150) -> ScratchTD:
