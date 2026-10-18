@@ -622,7 +622,9 @@ f.op('view_scalars').par.top = f.op('scalars_out')
 f.op('view_vel').par.top = f.op('vel_out')
 print('@@JSON@@' + json.dumps({'frames': [31, 91, 151], 'paths': paths}))
 ''', timeout=180)
-    print("showcase picture", report["showcase_picture"])
+    picture = report["showcase_picture"]
+    picture["paths"] = [str(Path(p).relative_to(ROOT)) for p in picture.get("paths", [])]
+    print("showcase picture", picture)
     manifest_path = show / "manifest.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
     member = ((manifest.get("members") or {}).get("destruction") or {}).get("params") or {}
