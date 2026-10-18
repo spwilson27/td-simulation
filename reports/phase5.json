@@ -1,5 +1,5 @@
 {
-  "cache_bytes_start": 3829063857,
+  "cache_bytes_start": 4562922657,
   "fracture": {
     "pieces": 16,
     "volume_error": 0.0,
@@ -125,11 +125,11 @@
     }
   },
   "realtime": {
-    "steps": 169,
-    "frames": 169,
+    "steps": 166,
+    "frames": 166,
     "seconds": 3.0,
-    "fps": 56.333333333333336,
-    "ms": 17.75147928994083,
+    "fps": 55.333333333333336,
+    "ms": 18.072289156626507,
     "scene": {
       "res": [
         64,
@@ -166,14 +166,14 @@
       }
     },
     "divergence": {
-      "rms": 0.027285298785164714,
-      "max_abs": 0.7176513671875,
+      "rms": 0.028916804886721766,
+      "max_abs": 0.7325439453125,
       "finite": true
     }
   },
   "divergence": {
-    "rms": 0.027285298785164714,
-    "max_abs": 0.7176513671875,
+    "rms": 0.028916804886721766,
+    "max_abs": 0.7325439453125,
     "finite": true
   },
   "pictures": {
@@ -209,42 +209,7 @@
     "mismatched": [],
     "identical": true
   },
-  "showcase_bake": {
-    "pieces": 1000,
-    "baking": true,
-    "status": "baking from frame 1",
-    "pumped": {
-      "baking": false,
-      "status": "complete: 180 frames in 58.9s",
-      "frame": 180
-    }
-  },
-  "showcase_picture": {
-    "frames": [
-      31,
-      91,
-      151
-    ],
-    "paths": [
-      "reports/phase5_showcase_00031.npy",
-      "reports/phase5_showcase_00091.npy",
-      "reports/phase5_showcase_00151.npy"
-    ]
-  },
-  "showcase": {
-    "frames_written": 180,
-    "pieces": 1000,
-    "fluid_res": [
-      128,
-      128,
-      128
-    ],
-    "bytes": 863082203,
-    "png": "reports/phase5_showcase.png",
-    "sheet": "reports/phase5_showcase_sheet.png"
-  },
-  "showcase_bytes": 863082203,
-  "showcase_kept": true,
+  "quick": true,
   "pieces_png": {
     "path": "reports/phase5_pieces.png",
     "mean_luma": 0.016093789270152505,
@@ -269,6 +234,6 @@
   "phase4": 0,
   "shaders": 0,
   "pytest": 0,
-  "cache_bytes_end": 3829063857,
+  "cache_bytes_end": 4562922657,
   "pass": true
 }

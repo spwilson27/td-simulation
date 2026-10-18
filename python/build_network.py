@@ -443,6 +443,9 @@ def build(parent_path: str = "/") -> dict:
     import build_destruction  # noqa: PLC0415
     importlib.reload(build_destruction)
     build_destruction.build_destruction(sims, me)
+    import build_liquid  # noqa: PLC0415
+    importlib.reload(build_liquid)
+    build_liquid.build_liquid(sims, me)
     build_baker(sims)
     build_cache_reader(sims)
     for comp in sims.children:

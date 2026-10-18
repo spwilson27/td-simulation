@@ -87,23 +87,23 @@
     "err": ""
   },
   "uncapped": {
-    "steps": 249,
-    "frames": 249,
-    "fps": 83.0
+    "steps": 283,
+    "frames": 283,
+    "fps": 94.33
   },
   "capped": {
-    "steps": 184,
-    "frames": 184,
-    "fps": 61.33
+    "steps": 185,
+    "frames": 185,
+    "fps": 61.67
   },
   "pressure": {
     "jacobi12": {
-      "seconds": 0.002983874990604818,
+      "seconds": 0.0034558750921860337,
       "div_pre": 0.050596680492162704,
       "div_post": 0.02546836994588375
     },
     "multigrid": {
-      "seconds": 0.004980666970368475,
+      "seconds": 0.005728458985686302,
       "div_pre": 0.05933103710412979,
       "div_post": 0.03795059025287628
     }
@@ -135,7 +135,7 @@
     "status": "fluid3d 128x128x128 complete"
   },
   "cancelled": {
-    "status": "cancelled: 16 frames in 2.3s",
+    "status": "cancelled: 16 frames in 2.4s",
     "baking": false,
     "frame": 16,
     "pumped": 0,

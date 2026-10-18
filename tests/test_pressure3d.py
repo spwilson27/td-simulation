@@ -55,3 +55,62 @@ def test_vcycle_reduces_smooth_divergence_tenfold():
     )
     assert before / after >= 10.0
     assert before / after > before / after_jacobi
+
+
+def test_liquid_free_surface_stencil_matches_jacobi():
+    """Air is Dirichlet (p = 0). div(grad p) has to be the stencil Jacobi inverts, on liquid cells."""
+    rng = np.random.default_rng(4)
+    n = 12
+    pressure_field = rng.normal(size=(n, n, n))
+    air = np.zeros((n, n, n), dtype=bool)
+    air[:, n // 2:, :] = True
+    solid = np.zeros((n, n, n), dtype=bool)
+    solid[0, :, :] = True
+    pressure_field[air | solid] = 0.0
+    got = pressure.laplacian(pressure_field, solid=solid, air=air)
+    # One Jacobi residual step at omega 1 from 0 is not the operator; build it from the neighbour sum.
+    acc = np.zeros_like(pressure_field)
+    for axis in range(3):
+        for delta in (1, -1):
+            nb = pressure._sample(pressure_field, axis, delta, fill=0.0)
+            nb_liquid = pressure._neighbour_fluid(~air & ~solid, axis, delta)
+            nb_air = pressure._neighbour_fluid(air, axis, delta)
+            acc += np.where(nb_liquid, nb, np.where(nb_air, 0.0, pressure_field))
+    stencil = (acc - 6.0 * pressure_field)
+    liquid = ~air & ~solid
+    assert np.max(np.abs(got[liquid] - stencil[liquid])) < 1e-9
+
+
+def test_mgpcg_hydrostatic_column_is_at_rest():
+    """A tank with a floor and an open top: CG+V-cycle must recover p = g dt * depth and kill the velocity."""
+    n = 32
+    h = 1.0 / n
+    liquid = np.zeros((n, n, n), dtype=bool)
+    liquid[:, : n // 2, :] = True
+    air = ~liquid
+    gdt = 9.81 / 60.0
+    vel = np.zeros((n, n, n, 3))
+    vel[..., 1] = np.where(liquid, -gdt, 0.0)
+    rhs = pressure.divergence(vel, h, air=air)
+    solved, history = pressure.mgpcg(rhs, h, air=air, iterations=6, smooth=1, coarse_iters=16)
+    out = pressure.project(vel, solved, h, air=air)
+    div = pressure.rms(pressure.divergence(out, h, air=air), air=air)
+    assert history[0] == 1.0
+    assert history[-1] < 0.02
+    assert history[-1] < history[1]
+    assert abs(float(out[..., 1][liquid].mean())) < 1e-3
+    assert div <= 0.03
+    # Bottom pressure is g dt times the liquid depth.
+    assert abs(float(solved[n // 2, 0, n // 2]) - gdt * (n // 2) * h) < 0.01
+
+
+def test_liquid_vcycle_cuts_a_free_surface_divergence():
+    # Dyadic grid: the free-surface restriction is un-normalised, and a 24^3 grid does not halve
+    # onto an even coarse mask. Two cycles on 16^3 still take the divergence down by about 8x.
+    vel = _smooth_velocity(16)
+    air = np.zeros(vel.shape[:3], dtype=bool)
+    air[:, 10:, :] = True
+    vel[air] = 0.0
+    report = pressure.reduction(vel, air=air, cycles=2, smooth=4, coarse_iters=30)
+    assert report["before"] > 0.0
+    assert report["factor"] >= 8.0

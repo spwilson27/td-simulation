@@ -70,6 +70,10 @@ DATs file-synced to the repo.
   still recooks a dirty input, so the mesh jump flood ran every frame (~90 ms at 128³) while its zero-volume
   input carried the clock, and the sim stayed under 30 fps. Static volumes bind those uniforms to constants.
   The mesh SDF is voxelized once into `sdf_hold` and rigid-transformed after that.
+- `numpyArray(delayed=False)` inside a per-step loop is a GPU sync. MGPCG was latency-bound when every CG
+  iteration read three dots back to Python (~2 ms of GPU work reported as ~3 ms of wall time, and a 28 ms
+  chain ran at ~41 ms/step). Keep iterative-solver scalars on the GPU: reduce to a 1×1 texture, compute
+  alpha/beta in a tiny pass, and let the saxpy sample that texture. Read the residual ratio once per step.
 - The same pull means a later script can recook the 3D solver and move the live snapshot off the frame just
   saved. A byte-exact replay compare has to run in the same `execute_python` as the `Tick` that saved it.
 - Movie File In's default index is `me.time.frame`, which rewrites the frame number inside an EXR path.
@@ -100,6 +104,7 @@ DATs file-synced to the repo.
 - A destruction reset that restores the rigid snapshot has to clear the dust texture too. Glue `_emitted` lives on the glue objects; leaving it set makes the next bake skip the dust puff, and the smoke field then diverges while the body state still matches.
 - Piece obstacles on the bus are oriented boxes (the piece's local AABB), not the exact convex SDF. The obstacle shader walks at most 8 bins. Do not put `uClock` on that shader.
 - The realtime destruction scene is 64³, four multigrid V-cycles with 8 smooth sweeps, a 480×270 volume (6 ray steps, 2 shadow steps), and bounding-sphere piece contacts. A 128³ grid plus mesh contacts does not hold 30 fps once the pieces, the volume, and the debris are drawing. Four cycles at 64³ land the divergence under the phase 4 Jacobi residual and the frame near 60 fps. The numpy tests still use mesh contacts. A projectile only hits a shard whose centre enters the projectile radius, so the bounding spheres do not shatter the wall. The 1000-piece showcase uses that broadphase at 128³, with fluid keyframes every 30 frames and cropped scalars in between, so the cache stays under 3 GB.
+- FLIP particle-to-grid is a bitonic sort of `(cell id, particle index)` followed by a per-cell gather. Float addition order is then the particle index order, so a resumed bake matches. Renormalising the free-surface residual onto the coarse grid amplifies the interface and the V-cycle diverges above 16³; leaving those weights un-normalised stays stable, and a short fine-grid Jacobi polish after the V-cycle is what keeps a tank from draining into a puddle. The liquid must not sample the obstacle merge it publishes into: that phi would become a solid on the next step. A time-varying emitter left on the bus makes a replay from a saved particle state disagree with the live step, because the force depends on the clock. A Cache TOP still stores only the first image of a TouchDesigner frame, so a picture saved after several scripted ticks has to be snapped in a later call, and the baker's preview is a locked null cooked inside the step.
 
 ## Phase plan
 1. Done: clock, bus, baker, cache reader, GPU probe, 2D smoke/fire.
@@ -113,8 +118,7 @@ DATs file-synced to the repo.
    step on this Mac), breakable glue, pieces as moving bus obstacles, debris particles and dust. Realtime wall
    is 100 pieces plus 128³ Jacobi; the group bake is 96³ and byte-identical across cancel/resume via `.npy` body
    and particle state. Bus obstacles are the piece OBBs.
-6. FLIP liquids (bake + real-time 2D preview): GPU binning + gather P2G, multigrid pressure, surface (marching cubes
-   or screen-space), interaction with obstacles/destruction/smoke.
+6. In progress: GPU FLIP on the 3D bus. The live sort is a stable 6-digit radix (cell id, then particle index); `SortAgrees` checks it against a full bitonic sort. Free-surface pressure is MGPCG (CG on the fine grid, one symmetric V-cycle per iteration, air Dirichlet, clamp-to-edge prolongation). Each step runs 8 warm-started iterations; alpha and beta stay in 1×1 textures, and the residual ratio is read once. A still 64³ tank holds its height over 120 steps (95th percentile 0.414 m to 0.415 m, divergence RMS about 7e-5, max speed about 0.0005 m/s). The dam toe stays within 22% of the Martin & Moyce Z(T) line. 64³ realtime still misses a 30 ms frame (79 steps against 187 frames in 3 s). The 48³ preset holds 124,250 live particles with the surface on. A synced splash step was sort 1.2 ms, P2G 1.8 ms, divergence 0.8 ms, MGPCG 13.1 ms (8 iterations), G2P 1.3 ms, render 0.7 ms. At a 33 fps cook rate both validation windows were 100 steps and 100 frames. The 180-frame showcase is 128³ with 2,018,940 live particles.
 7. Cloth: XPBD on GPU, bus wind, SDF collision, tearing, optional two-way air coupling; baked high-res.
 8. Integration: scene/preset system, cross-camp showcase scenes, performance pass, render/export outputs, docs.
    Phase 3 debt to clear here: the deterministic 2D particle splat (`shaders/particles/splat_sum.glsl`) sums all
@@ -128,3 +132,8 @@ DATs file-synced to the repo.
    Phase 4 debt: playback "upres" is mostly screen grain (it also speckles obstacles) and is validated on an early,
    small plume. Replace with real detail (wavelet turbulence / advected curl-noise in the volume, masked to smoke)
    and validate on a developed showcase frame. Multigrid at 256³ costs ~360 ms per projection (2.8 steps/s bake).
+   Phase 6 debt: the raymarch is the particle phi at grid resolution, so the surface is faceted. A script TOP
+   does not round-trip a 3D pressure volume through texelFetch; resume reloads a 2D pack. The bake preview
+   is drawn from that step's phi, not from a GLSL TOP that may already have cooked. Two-way push on rigid
+   pieces is not wired; point `extra_solids` at the destruction obstacle TOP for one-way coupling. APIC is
+   in `python/flip.py` only.

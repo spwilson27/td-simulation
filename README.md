@@ -1,6 +1,6 @@
 # td-simulations
 
-Real-time and baked simulation for TouchDesigner. Phase 1 is the shared infrastructure and a 2D smoke/fire solver: a fixed-step clock, a field bus that later solvers will share, and an EXR cache that can resume exactly. Phase 2 adds a 3D fluid and a volume renderer. Phase 3 adds GPU particles that ride the same bus, collide with its obstacles, and push forces and heat back into it.
+Real-time and baked simulation for TouchDesigner. Phase 1 is the shared infrastructure and a 2D smoke/fire solver: a fixed-step clock, a field bus that later solvers will share, and an EXR cache that can resume exactly. Phase 2 adds a 3D fluid and a volume renderer. Phase 3 adds GPU particles that ride the same bus, collide with its obstacles, and push forces and heat back into it. Phase 6 adds a GPU FLIP liquid on the same 3D bus.
 
 The solver runs one simulation step per TouchDesigner frame. In realtime that step is meant to hold 30 fps or better. In bake mode the project's real-time flag is turned off, every step is computed however long it takes, and the full fluid state is written to disk.
 
@@ -553,11 +553,35 @@ On this machine the Bullet Solver COMP can be created, and cooking it does not i
 
 **Destruction obstacles are oriented boxes.** The bus field is the piece's local AABB, rigidly transformed, not the Voronoi mesh. Corners of the true mesh can sit outside that box. The realtime wall uses 4 Jacobi sweeps so 100 pieces plus the 128³ fluid stay above 30 fps. The checked group bake is 96³ for six frames; a 256³ cancel-and-resume of the same group did not fit beside the other phase checks. Fluid drag on the pieces defaults off.
 
+## Liquids
+
+`/sims/liquid` is a 3D FLIP liquid. Particles live in two float textures. Each step sorts them by grid cell with a stable radix sort (the same cell-then-index order as a bitonic sort) and gathers mass and momentum in particle-index order, so the transfer does not depend on thread order. The grid is the 3D bus. The free surface is Dirichlet pressure, solved by multigrid-preconditioned conjugate gradient: conjugate gradient on the fine grid, one symmetric V-cycle as the preconditioner. A still tank reuses the previous pressure, so later steps finish in a couple of iterations. Particles then take a FLIP/PIC blend and stay out of the box and out of solids.
+
+`ApplyPreset('realtime')` is a 48³ dam with a 512×256 state texture, 124,250 live particles, and the raymarched surface on (480×270, 16 ray steps). Pressure is 8 multigrid-preconditioned CG iterations with alpha and beta left on the GPU. A synced splash step is about 1.5 ms sort, 1.8 ms P2G, 0.8 ms divergence, 13.5 ms solve, 1.4 ms G2P and 0.8 ms render. A 64³ frame still missed a 30 ms budget (79 steps against 187 frames in 3 s). At a 33 fps cook rate the 48³ preset keeps one step per frame. `ApplyPreset('tank')` is a 64³ pool. Over 120 steps the 95th-percentile height stays near 0.415 m, the divergence RMS stays near 0.013, and the fastest particle is about 0.004 m/s. `ApplyPreset('bake')` is a 128³ column running into a sphere, 2,018,940 live particles, 2048×1024 state. `Restore()` puts the smoke bus back.
+
+The dam-break toe, with column width a = 0.25 m and height 2a, is compared to Martin & Moyce (1952) as Z = x/a and T = t·sqrt(2g/a). The simulated front stays within 22% of the reference line of slope about 1.29.
+
+The picture is `render_out`. `preview` is a 256² side-on slice of that step's phi and is what a reduced bake stores between keyframes. A group bake writes `.npy` beside the EXR for the particles and for a 2D pack of the pressure, which is what resume reloads. Point `extra_solids` at a destruction obstacle TOP when pieces should block the liquid. While a liquid preset is applied, the demo3d emitter and obstacles are unpublished.
+
+`scripts/validate_phase6.py` is the gate. The 48³ realtime preset runs at a 33 fps cook rate and keeps one simulation step per frame.
+
+```python
+liq = op('/sims/liquid')
+liq.ApplyPreset('realtime')
+op.simclock.par.Sims = '/sims/liquid'
+```
+
+The liquid publishes a narrow-band signed distance (negative inside, alpha 1) and the grid velocity onto the 3D obstacle bus, so smoke and the phase 3 particles treat the liquid as a solid. Its own solver does not read that field back. It reads a kinematic sphere (`Spherer`, `Spherx/y/z`) plus `extra_solids`, which you can point at `/sims/destruction/obstacles3d` when pieces should push the liquid. While a liquid preset is applied, the demo3d emitter and obstacles are unpublished so their time-varying force does not get into the bake.
+
+The picture is `render_out`, a raymarch of the liquid phi with an opaque background. `preview` is a side-on slice of that step's phi. A group bake (`Groupsims` `/sims/liquid`) writes particle state as `.npy` next to the EXR, because that is the float32 state resume loads. Set `Playbackfields` to `preview` and a keyframe interval so the frames between keyframes stay small.
+
+`scripts/validate_phase6.py` is the gate. The realtime preset keeps one step per frame at 33 fps.
+
 ## Roadmap
 
 Later phases add the other solvers, all of them publishing onto this bus:
 
-- FLIP liquids. Particle-to-grid will gather binned particles, because float image atomics are unavailable. The phase 3 splat is the additive-blend half of that; a liquid needs the gather. Destruction pieces are already moving obstacles on the bus (signed distance plus rigid velocity), which is the obstacle contract a liquid should sample.
+- Cloth. XPBD on the GPU, wind sampled from the fluid bus, collision against rigid pieces and the liquid surface, tearing, optional two-way air coupling, baked high resolution.
 
 ## Benchmarks
 

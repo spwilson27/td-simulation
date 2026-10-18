@@ -520,12 +520,16 @@ print('@@JSON@@' + json.dumps({'status': b.par.Status.eval(), 'baking': b.ext.Ba
     if resumed.exists():
         shutil.rmtree(resumed)
 
-    # Showcase: 1000 pieces, 180 frames, 128^3, reduced keyframes. Renders are off while
-    # baking; one mid-break frame is drawn from the cache afterwards.
-    show = ROOT / "cache" / "phase5_showcase"
-    if show.exists():
-        shutil.rmtree(show)
-    report["showcase_bake"] = td.run_json(r'''
+    quick = "--quick" in sys.argv
+    report["quick"] = quick
+    # --quick skips the 180-frame showcase bake and leaves that cache in place.
+    if not quick:
+        # Showcase: 1000 pieces, 180 frames, 128^3, reduced keyframes. Renders are off while
+        # baking; one mid-break frame is drawn from the cache afterwards.
+        show = ROOT / "cache" / "phase5_showcase"
+        if show.exists():
+            shutil.rmtree(show)
+        report["showcase_bake"] = td.run_json(r'''
 import json
 d = op('/sims/destruction')
 f = op('/sims/fluid3d')
@@ -570,10 +574,10 @@ b.Bake()
 print('@@JSON@@' + json.dumps({'pieces': info.get('pieces'), 'baking': b.ext.Baker.baking,
     'status': str(b.par.Status.eval())}))
 ''', timeout=180)
-    print("showcase arm", report["showcase_bake"])
-    showcase_state = report["showcase_bake"]
-    for _ in range(20):
-        showcase_state = td.run_json(r'''
+        print("showcase arm", report["showcase_bake"])
+        showcase_state = report["showcase_bake"]
+        for _ in range(20):
+            showcase_state = td.run_json(r'''
 import json
 b = op('/sims/baker')
 for _ in range(12):
@@ -583,11 +587,11 @@ for _ in range(12):
 print('@@JSON@@' + json.dumps({'baking': b.ext.Baker.baking, 'status': str(b.par.Status.eval()),
     'frame': int(op.simclock.par.Frame.eval())}))
 ''', timeout=180)
-        print(" showcase", showcase_state)
-        if not showcase_state.get("baking"):
-            break
-    report["showcase_bake"]["pumped"] = showcase_state
-    report["showcase_picture"] = td.run_json(r'''
+            print(" showcase", showcase_state)
+            if not showcase_state.get("baking"):
+                break
+        report["showcase_bake"]["pumped"] = showcase_state
+        report["showcase_picture"] = td.run_json(r'''
 import json
 import numpy as np
 d = op('/sims/destruction')
@@ -622,61 +626,61 @@ f.op('view_scalars').par.top = f.op('scalars_out')
 f.op('view_vel').par.top = f.op('vel_out')
 print('@@JSON@@' + json.dumps({'frames': [31, 91, 151], 'paths': paths}))
 ''', timeout=180)
-    picture = report["showcase_picture"]
-    picture["paths"] = [str(Path(p).relative_to(ROOT)) for p in picture.get("paths", [])]
-    print("showcase picture", picture)
-    manifest_path = show / "manifest.json"
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
-    member = ((manifest.get("members") or {}).get("destruction") or {}).get("params") or {}
-    fluid_member = ((manifest.get("members") or {}).get("fluid3d") or {}).get("params") or {}
-    show_bytes = sum(p.stat().st_size for p in show.rglob("*") if p.is_file()) if show.exists() else 0
-    sheet_path = REPORTS / "phase5_showcase_sheet.png"
-    showcase_png = REPORTS / "phase5_showcase.png"
-    def _png_from_npy(frame: int):
-        array_path = REPORTS / f"phase5_showcase_{frame:05d}.npy"
-        if not array_path.is_file():
-            return None
-        image = np.load(array_path)
-        rgb = np.clip(image[..., :3], 0.0, 1.0)
-        from PIL import Image
-        png = REPORTS / f"phase5_showcase_{frame:05d}.png"
-        Image.fromarray((rgb * 255.0).astype(np.uint8), mode="RGB").save(png)
-        return png
-
-    mid = _png_from_npy(91)
-    if mid is not None and mid.is_file():
-        shutil.copyfile(mid, showcase_png)
-        try:
+        picture = report["showcase_picture"]
+        picture["paths"] = [str(Path(p).relative_to(ROOT)) for p in picture.get("paths", [])]
+        print("showcase picture", picture)
+        manifest_path = show / "manifest.json"
+        manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+        member = ((manifest.get("members") or {}).get("destruction") or {}).get("params") or {}
+        fluid_member = ((manifest.get("members") or {}).get("fluid3d") or {}).get("params") or {}
+        show_bytes = sum(p.stat().st_size for p in show.rglob("*") if p.is_file()) if show.exists() else 0
+        sheet_path = REPORTS / "phase5_showcase_sheet.png"
+        showcase_png = REPORTS / "phase5_showcase.png"
+        def _png_from_npy(frame: int):
+            array_path = REPORTS / f"phase5_showcase_{frame:05d}.npy"
+            if not array_path.is_file():
+                return None
+            image = np.load(array_path)
+            rgb = np.clip(image[..., :3], 0.0, 1.0)
             from PIL import Image
-            tiles = []
-            for frame in (31, 91, 151):
-                made = _png_from_npy(frame)
-                if made is None:
-                    continue
-                tiles.append(Image.open(made).convert("RGB"))
-            if not tiles:
-                raise RuntimeError("no showcase frames")
-            width = sum(tile.width for tile in tiles)
-            height = max(tile.height for tile in tiles)
-            sheet = Image.new("RGB", (width, height), (0, 0, 0))
-            x = 0
-            for tile in tiles:
-                sheet.paste(tile, (x, 0))
-                x += tile.width
-            sheet.save(sheet_path)
-        except Exception as exc:
-            report["showcase_sheet_error"] = repr(exc)
-    report["showcase"] = {
-        "frames_written": int(manifest.get("frames_written") or 0),
-        "pieces": int(((member.get("settings") or {}).get("count") or 0)),
-        "fluid_res": fluid_member.get("res"),
-        "bytes": show_bytes,
-        "png": "reports/phase5_showcase.png",
-        "sheet": "reports/phase5_showcase_sheet.png" if sheet_path.is_file() else None,
-    }
-    report["showcase_bytes"] = show_bytes
-    report["showcase_kept"] = show_bytes > 0 and show_bytes <= 3 * (1024 ** 3)
-    print("showcase", report["showcase"])
+            png = REPORTS / f"phase5_showcase_{frame:05d}.png"
+            Image.fromarray((rgb * 255.0).astype(np.uint8), mode="RGB").save(png)
+            return png
+
+        mid = _png_from_npy(91)
+        if mid is not None and mid.is_file():
+            shutil.copyfile(mid, showcase_png)
+            try:
+                from PIL import Image
+                tiles = []
+                for frame in (31, 91, 151):
+                    made = _png_from_npy(frame)
+                    if made is None:
+                        continue
+                    tiles.append(Image.open(made).convert("RGB"))
+                if not tiles:
+                    raise RuntimeError("no showcase frames")
+                width = sum(tile.width for tile in tiles)
+                height = max(tile.height for tile in tiles)
+                sheet = Image.new("RGB", (width, height), (0, 0, 0))
+                x = 0
+                for tile in tiles:
+                    sheet.paste(tile, (x, 0))
+                    x += tile.width
+                sheet.save(sheet_path)
+            except Exception as exc:
+                report["showcase_sheet_error"] = repr(exc)
+        report["showcase"] = {
+            "frames_written": int(manifest.get("frames_written") or 0),
+            "pieces": int(((member.get("settings") or {}).get("count") or 0)),
+            "fluid_res": fluid_member.get("res"),
+            "bytes": show_bytes,
+            "png": "reports/phase5_showcase.png",
+            "sheet": "reports/phase5_showcase_sheet.png" if sheet_path.is_file() else None,
+        }
+        report["showcase_bytes"] = show_bytes
+        report["showcase_kept"] = show_bytes > 0 and show_bytes <= 3 * (1024 ** 3)
+        print("showcase", report["showcase"])
 
     report["pieces_png"] = image_stats(REPORTS / "phase5_pieces.png")
     report["smoke_png"] = image_stats(REPORTS / "phase5_smoke.png")
@@ -753,9 +757,11 @@ print('@@JSON@@' + json.dumps({'frames': [31, 91, 151], 'paths': paths}))
         and div.get("finite") is True
         and div.get("rms", 1.0) <= 2.0 * PHASE4_REALTIME_DIV_RMS
         and report["bake"].get("identical") is True
-        and report["showcase_kept"] is True
-        and int(showcase.get("frames_written") or 0) >= 180
-        and int(showcase.get("pieces") or 0) >= 1000
+        and (report.get("quick") or (
+            report["showcase_kept"] is True
+            and int(showcase.get("frames_written") or 0) >= 180
+            and int(showcase.get("pieces") or 0) >= 1000
+        ))
         and pics.get("std_luma", 0) > 0.005
         and pics.get("blown", 1) < 0.05
         and pics.get("coverage", 0) > 0.005

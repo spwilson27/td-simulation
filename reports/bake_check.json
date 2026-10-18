@@ -2,13 +2,13 @@
   "frames": 40,
   "preset": "realtime",
   "full_bake": {
-    "status": "complete: 40 frames in 1.8s",
+    "status": "complete: 40 frames in 1.9s",
     "baking": false,
     "frame": 40,
     "cache": "complete",
     "realtime": true,
-    "seconds": 1.87,
-    "fps": 21.41
+    "seconds": 1.9,
+    "fps": 21.05
   },
   "cancelled": {
     "status": "cancelled: 24 frames in 1.0s",
