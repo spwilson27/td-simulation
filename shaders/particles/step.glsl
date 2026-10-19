@@ -222,13 +222,5 @@ vec4 particleOutput(ivec2 coord)
 	confine(p2, v2);
 	age += dt;
 	life = max(life - dt, 0.0);
-	// Bus advection only. A resumed sample of the cached velocity can be one fluid
-	// quantize bin off; snapping keeps both runs on the same side of that boundary.
-	// Constant and rotation modes stay exact so a tracer still matches the analytic path.
-	if (uField.x < 0.5)
-	{
-		p2 = round(p2 * 1e4) / 1e4;
-		v2 = round((v2 + 1e-5) * 1e4) / 1e4;
-	}
 	return uWrite.x < 0.5 ? vec4(p2, age) : vec4(v2, life);
 }

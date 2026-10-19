@@ -1,0 +1,285 @@
+{
+  "nested": {
+    "bake_check": 0,
+    "phase2": 0,
+    "phase3": 0,
+    "phase4": 0,
+    "phase5": 0,
+    "phase6": 0,
+    "phase7": 0
+  },
+  "showcase": {
+    "frames": 180,
+    "bytes": 934636551,
+    "bad": 0,
+    "mismatched": [],
+    "manifest_diff": [],
+    "complete": true,
+    "replay": 0.0,
+    "replay_frames": 3,
+    "replay_mean": 0.0,
+    "replay_neighbor": 0.5176470801234245,
+    "replay_neighbor_mean": 0.0014653383156307685,
+    "replay_pairs": [
+      {
+        "frame": 36,
+        "neighbor": 37,
+        "diff": 0.0,
+        "mean": 0.0,
+        "neighbor_diff": 0.9803921561688185,
+        "neighbor_mean": 0.005016498753774399
+      },
+      {
+        "frame": 90,
+        "neighbor": 91,
+        "diff": 0.0,
+        "mean": 0.0,
+        "neighbor_diff": 0.8823529407382011,
+        "neighbor_mean": 0.003032430113227837
+      },
+      {
+        "frame": 180,
+        "neighbor": 179,
+        "diff": 0.0,
+        "mean": 0.0,
+        "neighbor_diff": 0.5176470801234245,
+        "neighbor_mean": 0.0014653383156307685
+      }
+    ],
+    "stills": {
+      "frames": [
+        36,
+        90,
+        180
+      ],
+      "width": 480,
+      "height": 270,
+      "opaque": true,
+      "distinct": 0.9803921561688185,
+      "checker": 0.10894596988485385,
+      "pieces": 0.017750613391399384,
+      "liquid": 0.0676918476819992,
+      "smoke": 0.042213018983602524,
+      "cloth": 0.008076345548033714,
+      "debris": 0.15179026126861572,
+      "layers": [
+        {
+          "smoke": 0.042213018983602524,
+          "pieces": 0.017750613391399384,
+          "liquid": 0.0676918476819992,
+          "cloth": 0.008458424359560013,
+          "debris": 0.15179026126861572
+        },
+        {
+          "smoke": 0.04997320473194122,
+          "pieces": 0.018255889415740967,
+          "liquid": 0.06898138672113419,
+          "cloth": 0.009357456117868423,
+          "debris": 0.1067672073841095
+        },
+        {
+          "smoke": 0.05266869440674782,
+          "pieces": 0.01784771867096424,
+          "liquid": 0.06973087042570114,
+          "cloth": 0.008076345548033714,
+          "debris": 0.04389351233839989
+        }
+      ],
+      "errors": [
+        [],
+        [],
+        []
+      ]
+    },
+    "pngs": [
+      {
+        "path": "reports/phase8_showcase_a.png",
+        "mean": 0.07493508607149124,
+        "std": 0.1755208671092987,
+        "max": 1.0,
+        "checker": 0.09193669932177845
+      },
+      {
+        "path": "reports/phase8_showcase_b.png",
+        "mean": 0.09559501707553864,
+        "std": 0.20709596574306488,
+        "max": 1.0,
+        "checker": 0.10320901994796183
+      },
+      {
+        "path": "reports/phase8_showcase_c.png",
+        "mean": 0.08087519556283951,
+        "std": 0.1581198275089264,
+        "max": 1.0,
+        "checker": 0.10894596988485385
+      }
+    ],
+    "sheet": {
+      "path": "reports/phase8_showcase_sheet.png",
+      "mean": 0.0838017612695694,
+      "std": 0.18158970773220062,
+      "max": 1.0,
+      "checker": 0.10085896370185647
+    }
+  },
+  "export": {
+    "frames": 180,
+    "width": 480,
+    "height": 270,
+    "movie": "cache/exports/phase8_showcase.mp4",
+    "bytes": 398639,
+    "sequence": "cache/exports/frames"
+  },
+  "splat": {
+    "res": [
+      1024,
+      1024
+    ],
+    "recook": 0.0,
+    "cpu": 0.0002990307693481187,
+    "cpu_sum": 21.247581,
+    "gpu_sum": 21.247581111150794,
+    "err": "",
+    "fps": {
+      "steps": 97,
+      "frames": 97,
+      "fps": 32.33,
+      "steps_match_frames": true
+    }
+  },
+  "group": {
+    "files": 133,
+    "bad": 0,
+    "mismatched": []
+  },
+  "liquid": {
+    "uniform": true,
+    "hf_raw": 0.0004175456997472793,
+    "hf_smooth": 0.00032473052851855755,
+    "axis_raw": 0.513571048430016,
+    "axis_smooth": 0.5099540581929556,
+    "raw": {
+      "path": "reports/phase8_liquid_raw.png",
+      "mean": 0.06182560697197914,
+      "std": 0.03103591501712799,
+      "max": 0.6549019813537598,
+      "checker": 0.00031622219879835566
+    },
+    "smooth": {
+      "path": "reports/phase8_liquid_smooth.png",
+      "mean": 0.06117602810263634,
+      "std": 0.02966141328215599,
+      "max": 0.6549019813537598,
+      "checker": 0.00031622219879835566
+    },
+    "fps": {
+      "steps": 108,
+      "frames": 108,
+      "fps": 36.0,
+      "steps_match_frames": true
+    }
+  },
+  "upres": {
+    "frame": 110,
+    "lap_plain": 0.005613335408270359,
+    "lap_detail": 0.004596742335706949,
+    "lap_ratio": 0.8188967879835541,
+    "smoke_move": 0.08114629983901978,
+    "obstacle_move": 0.00017990377091336995,
+    "plain": {
+      "path": "reports/phase8_detail_plain.png",
+      "mean": 0.035726357251405716,
+      "std": 0.09593380242586136,
+      "max": 1.0,
+      "checker": 0.17204301075268819
+    },
+    "detail": {
+      "path": "reports/phase8_detail.png",
+      "mean": 0.0355517715215683,
+      "std": 0.09524134546518326,
+      "max": 1.0,
+      "checker": 0.18681318681318682
+    },
+    "checker": 0.18681318681318682
+  },
+  "scene": {
+    "preset": "realtime",
+    "sims": "/sims/destruction /sims/liquid /sims/fluid3d /sims/particles /sims/cloth",
+    "res": [
+      32,
+      32,
+      32
+    ],
+    "pieces": 32,
+    "particles": [
+      128,
+      128
+    ],
+    "render": [
+      480,
+      270
+    ],
+    "project": true,
+    "follow": 1.0000000657955588,
+    "slice_checker": 0.0,
+    "liquid_y_std": 0.06340333074331284,
+    "liquid_speed": 1.973262906074524,
+    "liquid_moved": 32768,
+    "debris": 817,
+    "banner_z": 0.1238824799656868,
+    "bypass": {
+      "/sims/fluid3d/render": false,
+      "/sims/liquid/render": false,
+      "/sims/destruction/pieces_render": false,
+      "/sims/cloth/cloth_render": false,
+      "/sims/particles/beauty": false
+    },
+    "err": "",
+    "fps": {
+      "steps": 156,
+      "frames": 156,
+      "fps": 52.0,
+      "steps_match_frames": true
+    },
+    "stages_ms": {
+      "destruction": 9.27,
+      "liquid": 2.92,
+      "fluid3d": 0.49,
+      "particles": 0.39,
+      "cloth": 1.05,
+      "picture": 2.53
+    },
+    "png": {
+      "path": "reports/phase8_combined.png",
+      "mean": 0.09579037874937057,
+      "std": 0.17651528120040894,
+      "max": 1.0,
+      "checker": 0.1526639344262295
+    },
+    "numbers": {
+      "banner_z": 0.1238824799656868,
+      "debris": 817,
+      "liquid_moved": 32768,
+      "follow": 1.0000000657955588,
+      "liquid_speed": 1.973262906074524,
+      "liquid_y_std": 0.06340333074331284
+    },
+    "match_previous": true
+  },
+  "repro": {
+    "frames": 40,
+    "files": 726,
+    "bad": 0,
+    "mismatched": [],
+    "manifest_diff": [],
+    "manifest_skipped": [
+      "frame_end",
+      "frames_written"
+    ]
+  },
+  "checker_witness": 0.22399250234301782,
+  "shaders": 0,
+  "pytest": 0,
+  "cache_bytes": 5274768376,
+  "pass": true
+}

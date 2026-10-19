@@ -139,18 +139,11 @@ def null(comp, name, src, col, row):
 
 
 def hold(comp, name, src, fmt, col, row):
-    """Cache TOP that Fluid2D.Step snapshots into. Inactive afterwards, so later reads do not recook the solver."""
-    c = place(comp.create(td.cacheTOP, name), col, row)
-    src.outputConnectors[0].connect(c.inputConnectors[0])
-    c.par.active = False
-    c.par.alwayscook = False
-    c.par.cachesize = 1
-    c.par.outputindex = 0
-    c.par.format = fmt
-    c.par.outputresolution = "useinput"
-    c.par.inputfiltertype = "nearest"
-    c.par.filtertype = "nearest"
-    return c
+    """Public view of a solved null. A Cache TOP copy of this image was not bit-stable, so resume
+    frames differed; a Select of the locked null saves the bytes the step computed."""
+    s = place(comp.create(td.selectTOP, name), col, row)
+    s.par.top = src
+    return s
 
 
 def constant(comp, name, fmt, rgba, col, row):
@@ -256,7 +249,7 @@ def build_fluid2d(sims):
     pulse_callbacks(f, {"Applypreset": "o.ApplyPreset(o.par.Preset.eval())"})
 
     src = {n: shader(f, n + "_src", f"shaders/fluid2d/{n}.glsl", -1, i + 3) for i, n in enumerate(
-        ("advect", "maccormack", "combust", "vorticity", "divergence", "jacobi", "project", "render_fire", "quantize"))}
+        ("advect", "maccormack", "combust", "vorticity", "divergence", "jacobi", "project", "render_fire"))}
     shader(f, "bus_glsl", "shaders/common/bus.glsl", -1, 2)
 
     P = "parent().par."
@@ -292,12 +285,9 @@ def build_fluid2d(sims):
     div = glsl(f, "divergence", src["divergence"], [forces, obs, combust], "mono32float", col=9, row=0)
     jac = glsl(f, "jacobi", src["jacobi"], [pr, div, obs], "mono32float", npasses="parent().par.Jacobi", col=10, row=1)
     proj = glsl(f, "project", src["project"], [forces, jac, obs], "rg32float", [("uLimit", (P + "Maxspeed",))], 11, 0)
-    qvel = glsl(f, "q_vel", src["quantize"], [proj], "rg32float", [("uStep", (1.0e5,))], 11, 3)
-    qsc = glsl(f, "q_scalars", src["quantize"], [combust], "rgba16float", [("uStep", (1.0e4,))], 11, 4)
-    qpr = glsl(f, "q_pressure", src["quantize"], [jac], "mono32float", [("uStep", (1.0e5,))], 11, 5)
-    vel_state = null(f, "vel_state", qvel, 12, 0)
-    sc_state = null(f, "scalars_state", qsc, 12, 1)
-    pr_state = null(f, "pressure_state", qpr, 12, 2)
+    vel_state = null(f, "vel_state", proj, 12, 0)
+    sc_state = null(f, "scalars_state", combust, 12, 1)
+    pr_state = null(f, "pressure_state", jac, 12, 2)
     hold(f, "vel_out", vel_state, "rg32float", 13, 0)
     sc_out = hold(f, "scalars_out", sc_state, "rgba16float", 13, 1)
     hold(f, "pressure_out", pr_state, "mono32float", 13, 2)
@@ -449,6 +439,9 @@ def build(parent_path: str = "/") -> dict:
     import build_cloth  # noqa: PLC0415
     importlib.reload(build_cloth)
     build_cloth.build_cloth(sims, me)
+    import build_scenes  # noqa: PLC0415
+    importlib.reload(build_scenes)
+    build_scenes.build_scenes(sims, me)
     build_baker(sims)
     build_cache_reader(sims)
     for comp in sims.children:

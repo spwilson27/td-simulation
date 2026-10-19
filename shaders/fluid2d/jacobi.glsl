@@ -4,11 +4,21 @@
 // the centre value (no flow through walls), as do the domain sides.
 // in0: pressure, in1: divergence, in2: obstacles
 
+// texelFetch, not texture(). The warm start is a Feedback TOP on a continuous step and a
+// Movie File In on resume. Those samplers do not filter an identical texel the same way, and
+// thirty Jacobi passes turn that into a pressure that no longer matches.
+float pFetch(vec2 uv)
+{
+	ivec2 size = textureSize(sTD2DInputs[0], 0);
+	ivec2 c = clamp(ivec2(uv * vec2(size)), ivec2(0), size - ivec2(1));
+	return texelFetch(sTD2DInputs[0], c, 0).r;
+}
+
 float pAt(vec2 uv, float pc)
 {
 	if (busOutside(uv))
 		return pc;
-	return busSolid(texture(sTD2DInputs[2], uv)) ? pc : texture(sTD2DInputs[0], uv).r;
+	return busSolid(texture(sTD2DInputs[2], uv)) ? pc : pFetch(uv);
 }
 
 out vec4 fragColor;
@@ -17,7 +27,7 @@ void main()
 	vec2 uv = vUV.st;
 	vec2 t = busTexel();
 	float h = busCell();
-	float pc = texture(sTD2DInputs[0], uv).r;
+	float pc = pFetch(uv);
 	float sum = pAt(uv + vec2(t.x, 0), pc) + pAt(uv - vec2(t.x, 0), pc)
 	          + pAt(uv + vec2(0, t.y), pc) + pAt(uv - vec2(0, t.y), pc);
 	float div = texture(sTD2DInputs[1], uv).r;

@@ -536,7 +536,8 @@ class Destruction:
         normal = normal / length if length > 1e-8 else np.array([0.0, 1.0, 0.0])
         self._bursts.append((point.copy(), 1.2))
         rng = np.random.Generator(np.random.PCG64(len(self._spawns) + 17))
-        for k in range(12):
+        count = int(self.ownerComp.par.Debrisn.eval()) if hasattr(self.ownerComp.par, "Debrisn") else 12
+        for k in range(max(count, 1)):
             jitter = rng.normal(size=3) * 0.02
             speed = 0.4 + 0.8 * float(rng.random())
             self._spawns.append((point + normal * 0.01 + jitter, np.asarray(velocity, np.float64) + normal * speed))
@@ -574,7 +575,8 @@ class Destruction:
                 if y >= h:
                     break
                 pos[y, x, :3] = np.asarray(point, np.float32)
-                pos[y, x, 3] = 1.4
+                # The burst shader uses this as the lifetime. Lifemax is what the scene asked for.
+                pos[y, x, 3] = float(parts.par.Lifemax.eval())
                 vel[y, x, :3] = np.asarray(speed, np.float32)
             self._spawns = []
         for name, image in (("burst_pos", pos), ("burst_vel", vel)):
@@ -654,7 +656,9 @@ class Destruction:
         p = self.ownerComp.par
         bus = op.simbus3d  # noqa: F821
         clock = op.simclock  # noqa: F821
-        shaders = sorted((d.name, d.text) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
+        import cache  # noqa: PLC0415
+
+        shaders = sorted((d.name, cache.text_dat_source(d)) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
         digest = hashlib.sha256(repr(shaders).encode("utf-8")).hexdigest()[:16]
         s = self._settings()
         s["gravity"] = float(p.Gravity.eval())

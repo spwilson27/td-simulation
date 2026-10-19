@@ -70,7 +70,11 @@ class Particles:
         for name, skip in (
             ("step_2d_pos", three), ("step_2d_vel", three), ("deposit_2d", three or not couple),
             ("step_3d_pos", not three), ("step_3d_vel", not three), ("deposit_3d", (not three) or not couple),
-            ("splat_render", (not couple) or not three), ("splat_sum", (not couple) or three),
+            ("splat_render", (not couple) or not three),
+            ("splat_count", (not couple) or three), ("splat_scan", (not couple) or three),
+            ("splat_base", (not couple) or three), ("splat_scatter", (not couple) or three),
+            ("splat_sum", (not couple) or three), ("splat_part", (not couple) or three),
+            ("splat_fence", (not couple) or three),
             ("splat_vol", not (three and couple)),
             ("forces_3d", not (three and couple)), ("sources_3d", not (three and couple)),
             ("beauty_render", not show), ("beauty", not show),
@@ -108,35 +112,25 @@ class Particles:
                 self.ownerComp.op("forces_3d").cook(force=True)
                 self.ownerComp.op("sources_3d").cook(force=True)
             else:
-                # A resumed fluid step samples the saved grids. Put the live publishers back
-                # before this step writes the next ones.
+                # The fluid step already ran, against the frozen grid from the previous particle
+                # step (or the grid the baker restored on resume). This step writes the next one.
                 bus = op.simbus  # noqa: F821
-                baker = op("/sims/baker")  # noqa: F821
                 table = bus.op("publishers")
-                swapped = False
-                for kind in ("forces", "sources"):
-                    live = self.ownerComp.op(kind + "_2d")
-                    hold = baker.op("hold_" + kind) if baker is not None else None
-                    if live is None or hold is None:
-                        continue
-                    for row in range(1, table.numRows):
-                        if table[row, 0].val == kind and table[row, 1].val == hold.path:
-                            table[row, 1] = live.path
-                            swapped = True
-                if swapped:
-                    bus.ext.FieldBus._refresh()
-                summed = self.ownerComp.op("splat_sum")
-                for name in ("forces_2d", "sources_2d"):
+                for name in ("splat_count", "splat_scan", "splat_base", "splat_scatter", "splat_sum", "splat_part", "splat_fence"):
                     node = self.ownerComp.op(name)
                     if node is not None:
-                        node.lock = False
-                summed.cook(force=True)
-                # Readback finishes the compute before the fluid samples it. Without the
-                # sync the fluid sometimes sees a partial grid and two bakes diverge.
-                summed.numpyArray(delayed=False)
+                        node.cook(force=True)
+                # The fence TOP reads every block sum, so this one-pixel readback waits for
+                # the whole grid. A full-resolution readback was the previous fence and it
+                # does not fit a 1024² bus inside the frame.
+                self.ownerComp.op("splat_fence").numpyArray(delayed=False)
                 self.ownerComp.op("forces_2d").cook(force=True)
                 self.ownerComp.op("sources_2d").cook(force=True)
-                # The bus merge is wired by a parameter, so it does not notice this cook on its own.
+                # Publish a locked copy. The fluid step runs first next frame and pulls the bus;
+                # a live splat recooks from the particles and no longer matches the grid that was saved.
+                for kind in ("forces", "sources"):
+                    self._publish_frozen(bus, table, kind)
+                bus.ext.FieldBus._refresh()
                 bus.op("forces").cook(force=True)
                 bus.op("sources").cook(force=True)
         if not self.ownerComp.par.Cookrender.eval():
@@ -147,6 +141,43 @@ class Particles:
             self.ownerComp.op("picture_out").cook(force=True)
         elif mode == "emissive":
             self.ownerComp.op("emissive_out").cook(force=True)
+
+    def _publish_frozen(self, bus, table, kind: str) -> None:
+        """Lock a copy of the splat and publish that, so the next fluid step cannot recook it."""
+        live = self.ownerComp.op(kind + "_2d")
+        if live is None:
+            return
+        import numpy as np  # noqa: PLC0415
+
+        image = np.array(live.numpyArray(delayed=False), dtype=np.float32, copy=True)
+        name = kind + "_pub"
+        top = self.ownerComp.op(name)
+        if top is not None and top.OPType != "scriptTOP":
+            top.destroy()
+            top = None
+        if top is None:
+            top = self.ownerComp.create(scriptTOP, name)  # noqa: F821
+            top.nodeX = 400
+            top.nodeY = 0 if kind == "forces" else -80
+        top.par.outputresolution = "custom"
+        top.par.resolutionw = int(image.shape[1])
+        top.par.resolutionh = int(image.shape[0])
+        top.par.format = "rgba32float"
+        top.lock = True
+        top.copyNumpyArray(np.ascontiguousarray(image))
+        kept = False
+        for row in reversed(range(1, table.numRows)):
+            path = table[row, 1].val
+            if table[row, 0].val != kind:
+                continue
+            if path == live.path or path.startswith(self.ownerComp.path) or path.endswith("/hold_" + kind):
+                if not kept:
+                    table[row, 1] = top.path
+                    kept = True
+                else:
+                    table.deleteRow(row)
+        if not kept:
+            table.appendRow([kind, top.path])
 
     def StateTops(self) -> dict:
         return {field: self.ownerComp.op(field + "_out") for field in STATE}
@@ -226,7 +257,9 @@ class Particles:
         p = self.ownerComp.par
         bus = op.simbus3d if p.Bus.eval() == "3d" else op.simbus  # noqa: F821
         clock = op.simclock  # noqa: F821
-        shaders = sorted((d.name, d.text) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
+        import cache  # noqa: PLC0415
+
+        shaders = sorted((d.name, cache.text_dat_source(d)) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
         digest = hashlib.sha256(repr(shaders).encode("utf-8")).hexdigest()[:16]
         res = list(bus.Res)
         return {
@@ -242,13 +275,13 @@ class Particles:
             "fps": clock.par.Fps.eval(),
             "substeps": int(clock.par.Substeps.eval()),
             "seed": int(clock.par.Seed.eval()),
-            "publishers": {kind: bus.Publishers(kind) for kind in ("sources", "forces", "obstacles")},
+            "publishers": {kind: sorted(bus.Publishers(kind)) for kind in ("sources", "forces", "obstacles")},
             "shaders": digest,
         }
 
     def Unbind(self) -> None:
         pairs = (
-            (op.simbus, ("forces_2d", "sources_2d")),  # noqa: F821
+            (op.simbus, ("forces_2d", "sources_2d", "forces_pub", "sources_pub")),  # noqa: F821
             (op.simbus3d, ("forces_3d", "sources_3d")),  # noqa: F821
         )
         for bus, names in pairs:

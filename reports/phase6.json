@@ -1,5 +1,5 @@
 {
-  "cache_bytes_start": 4905995737,
+  "cache_bytes_start": 6182431014,
   "quick": true,
   "transfer": {
     "active": 42875,
@@ -421,12 +421,12 @@
     "agrees": true
   },
   "stages": {
-    "sort": 1.36,
-    "p2g": 2.02,
-    "divergence": 0.82,
-    "solve": 13.5,
-    "g2p": 1.3,
-    "render": 0.74,
+    "sort": 1.66,
+    "p2g": 2.05,
+    "divergence": 1.14,
+    "solve": 14.76,
+    "g2p": 1.7,
+    "render": 0.92,
     "iters": 8
   },
   "bake_setup": {
@@ -435,7 +435,7 @@
   },
   "bake_full": {
     "baking": false,
-    "status": "complete: 6 frames in 0.6s",
+    "status": "complete: 6 frames in 0.7s",
     "frame": 6
   },
   "bake_resume_setup": {
@@ -465,27 +465,28 @@
     "pos_max_abs": 0.0,
     "flipped": false
   },
-  "png_diff": 0.028418644484728497,
+  "png_diff": 0.0284700243299254,
   "dam_png": {
     "path": "reports/phase6_dam.png",
-    "mean_luma": 0.06958535313606262,
-    "std_luma": 0.04922746121883392,
+    "mean_luma": 0.06933338940143585,
+    "std_luma": 0.04892914369702339,
     "min_alpha": 1.0,
     "blown": 0.0,
     "magenta": 0.0,
-    "unique_colors": 11,
+    "unique_colors": 9,
     "checker": false
   },
   "tank_png": {
     "path": "reports/phase6_tank.png",
-    "mean_luma": 0.09658662974834442,
-    "std_luma": 0.07889021933078766,
+    "mean_luma": 0.09661507606506348,
+    "std_luma": 0.07793772965669632,
     "min_alpha": 1.0,
     "blown": 0.0,
     "magenta": 0.0,
-    "unique_colors": 11,
+    "unique_colors": 6,
     "checker": false
   },
+  "regressions": "run by the caller",
   "bake_check": 0,
   "phase2": 0,
   "phase3": 0,
@@ -493,6 +494,6 @@
   "phase5": 0,
   "shaders": 0,
   "pytest": 0,
-  "cache_bytes_end": 4905995737,
+  "cache_bytes_end": 6182431014,
   "pass": true
 }

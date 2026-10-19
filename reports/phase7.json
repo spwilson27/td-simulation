@@ -1,5 +1,5 @@
 {
-  "cache_bytes_start": 4905995737,
+  "cache_bytes_start": 6182431014,
   "gpu_errors": {
     "shape": [
       8,
@@ -84,10 +84,10 @@
     "max_abs": 0.0
   },
   "realtime": {
-    "steps": 118,
-    "frames": 118,
+    "steps": 119,
+    "frames": 119,
     "seconds": 3.0,
-    "fps": 39.333333333333336,
+    "fps": 39.666666666666664,
     "scene": {
       "sims": "/sims/fluid3d /sims/cloth",
       "vertices": 4096,
@@ -143,21 +143,21 @@
     }
   },
   "stages": {
-    "solve_0": 67.34616705216467,
-    "sort0": 1.1690420797094703,
-    "self_0": 8.412875002250075,
-    "vel_state": 0.35941600799560547,
-    "cloth_render": 3.2270830124616623,
-    "composite": 1.3973340392112732
+    "solve_0": 2.7349579613655806,
+    "sort0": 1.3017080491408706,
+    "self_0": 8.882416994310915,
+    "vel_state": 0.41079206857830286,
+    "cloth_render": 3.3420000690966845,
+    "composite": 0.9474579710513353
   },
   "flutter": {
-    "mean_z_0": 0.26735326750684413,
-    "mean_z_1": 0.2719856202851848,
+    "mean_z_0": 0.26818740279192016,
+    "mean_z_1": 0.2720224616757136,
     "pin_z": 0.05,
-    "picture_diff": 0.013025009073317051
+    "picture_diff": 0.012792264111340046
   },
   "couple_ms": {
-    "ms": 7.965708966366947
+    "ms": 8.701208047568798
   },
   "bake": {
     "files": 24,
@@ -167,64 +167,17 @@
   "replay": {
     "pos_max_abs": 0.0
   },
-  "showcase_bake": {
-    "baking": false,
-    "status": "complete: 180 frames in 6.6s",
-    "frame": 180
-  },
-  "showcase_frames": [
-    {
-      "frame": 30,
-      "mean": 0.06258337199687958,
-      "pos_finite": true
-    },
-    {
-      "frame": 90,
-      "mean": 0.062488485127687454,
-      "pos_finite": true
-    },
-    {
-      "frame": 150,
-      "mean": 0.061773281544446945,
-      "pos_finite": true
-    }
-  ],
-  "speckle_showcase": {
-    "30": {
-      "fraction": 0.00021181952976064393,
-      "cloth_pixels": 4721
-    },
-    "90": {
-      "fraction": 0.00046569388388699164,
-      "cloth_pixels": 6442
-    },
-    "150": {
-      "fraction": 0.0,
-      "cloth_pixels": 5937
-    }
-  },
+  "quick": true,
   "showcase": {
-    "frames_written": 180,
-    "vertices": 65536,
-    "res": [
-      256,
-      256
-    ],
-    "bytes": 345077951,
-    "complete": true,
-    "frames": [
-      "reports/phase7_showcase_30.png",
-      "reports/phase7_showcase_90.png",
-      "reports/phase7_showcase_150.png",
-      "reports/phase7_showcase_sheet.png"
-    ]
+    "skipped": true
   },
+  "speckle_showcase": {},
   "flag_png": {
     "path": "reports/phase7_flag.png",
-    "mean_luma": 0.053134188055992126,
-    "std_luma": 0.1056375801563263,
+    "mean_luma": 0.051946885883808136,
+    "std_luma": 0.10975891351699829,
     "min_alpha": 1.0,
-    "blown": 0.002685185185185185,
+    "blown": 0.0029243827160493827,
     "magenta": 0.0,
     "unique_colors": 38,
     "checker": false
@@ -239,21 +192,22 @@
     "unique_colors": 8,
     "checker": false
   },
-  "png_diff": 0.07002656161785126,
+  "png_diff": 0.07210712134838104,
   "speckle": {
     "flag": {
-      "fraction": 0.0004146366746138696,
-      "cloth_pixels": 9647
+      "fraction": 0.00041118421052631577,
+      "cloth_pixels": 9728
     },
     "flag_later": {
-      "fraction": 0.00022606533288120268,
-      "cloth_pixels": 8847
+      "fraction": 0.0002255554302469832,
+      "cloth_pixels": 8867
     },
     "drape": {
       "fraction": 0.0,
       "cloth_pixels": 7476
     }
   },
+  "regressions": "run by the caller",
   "bake_check": 0,
   "phase2": 0,
   "phase3": 0,
@@ -262,6 +216,6 @@
   "phase6": 0,
   "shaders": 0,
   "pytest": 0,
-  "cache_bytes_end": 4333860885,
+  "cache_bytes_end": 5274768376,
   "pass": true
 }

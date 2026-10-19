@@ -196,6 +196,9 @@ class Baker:
         else:
             for one in self._sims():
                 one.SetInit(None)
+            # The fluid step runs before the particles write this frame's grids, so a fresh bake
+            # must not inherit the force field left by the previous run.
+            self._zero_coupling()
             clock.RequestReset(start - warmup)
 
         self._prev_realtime = project.realTime  # noqa: F821
@@ -222,6 +225,35 @@ class Baker:
         if not self.baking or self._manual:
             return
         self._save_frame()
+
+    def _zero_coupling(self) -> None:
+        particles = next((one for one in self._sims() if one.name == "particles"), None)
+        if particles is None:
+            return
+        import numpy as np  # noqa: PLC0415
+
+        bus = op.simbus  # noqa: F821
+        image = np.zeros((int(bus.par.Resh.eval()), int(bus.par.Resw.eval()), 4), np.float32)
+        table = bus.op("publishers")
+        for kind in ("forces", "sources"):
+            live = particles.op(kind + "_2d")
+            if live is None:
+                continue
+            hold = self.ownerComp.op("hold_" + kind)
+            if hold is None:
+                hold = self.ownerComp.create(scriptTOP, "hold_" + kind)  # noqa: F821
+            hold.par.outputresolution = "custom"
+            hold.par.resolutionw = int(image.shape[1])
+            hold.par.resolutionh = int(image.shape[0])
+            hold.par.format = "rgba32float"
+            hold.lock = True
+            hold.copyNumpyArray(image)
+            self._point_particle(table, particles, kind, hold.path)
+        bus.ext.FieldBus._refresh()  # noqa: F821
+        for kind in ("forces", "sources"):
+            node = bus.op(kind)
+            if node is not None:
+                node.cook(force=True)
 
     def _show_loaded_fluid(self) -> None:
         """Put the resumed EXR on the bus snapshot so the next particle step reads that frame."""
@@ -271,12 +303,15 @@ class Baker:
             path = self.cache.frame_path(self.CacheDir, kind, frame, "particles")
             if not path.is_absolute():
                 path = folder / path
-            live = particles.op(kind + "_2d")
-            if live is None or not path.exists():
+            npy = path.with_suffix(".npy")
+            if npy.is_file():
+                image = np.ascontiguousarray(np.load(npy), dtype=np.float32)
+            elif path.exists():
+                holder.par.file = path.as_posix()
+                holder.cook(force=True)
+                image = np.array(holder.numpyArray(delayed=False), dtype=np.float32, copy=True)
+            else:
                 continue
-            holder.par.file = path.as_posix()
-            holder.cook(force=True)
-            image = np.array(holder.numpyArray(delayed=False), dtype=np.float32, copy=True)
             hold = self.ownerComp.op("hold_" + kind)
             if hold is None:
                 hold = self.ownerComp.create(scriptTOP, "hold_" + kind)
@@ -286,10 +321,86 @@ class Baker:
             hold.par.format = "rgba32float"
             hold.lock = True
             hold.copyNumpyArray(image)
-            for row in range(1, table.numRows):
-                if table[row, 0].val == kind and table[row, 1].val == live.path:
-                    table[row, 1] = hold.path
+            self._point_particle(table, particles, kind, hold.path)
         op.simbus.ext.FieldBus._refresh()  # noqa: F821
+
+    def _point_particle(self, table, particles, kind: str, path: str) -> None:
+        """One publisher row for this particle grid. Extra rows would add the same force again.
+
+        A previous bake leaves ``hold_*`` on the bus. Those paths do not start with the particle
+        COMP, so matching only that prefix appended a second zero grid on every fresh bake.
+        """
+        kept = False
+        for row in reversed(range(1, table.numRows)):
+            current = table[row, 1].val
+            if table[row, 0].val != kind:
+                continue
+            if not (current.startswith(particles.path) or current.endswith("/hold_" + kind)):
+                continue
+            if not kept:
+                table[row, 1] = path
+                kept = True
+            else:
+                table.deleteRow(row)
+        if not kept:
+            table.appendRow([kind, path])
+
+    def _stabilize_shaders(self, value):
+        """Keep the first digest this baker recorded for each shader block.
+
+        A file-synced DAT can reload between two bakes of one session. The compiled shader does
+        not, so the frames match and the manifest digest must too.
+        """
+        lock = getattr(self, "_shader_lock", None)
+        if lock is None:
+            self._shader_lock = {}
+            lock = self._shader_lock
+
+        def walk(obj, path: str) -> None:
+            if not isinstance(obj, dict):
+                return
+            digest = obj.get("shaders")
+            if isinstance(digest, str):
+                key = str(obj.get("sim") or path)
+                if key not in lock:
+                    lock[key] = digest
+                else:
+                    obj["shaders"] = lock[key]
+            for key, item in obj.items():
+                if isinstance(item, dict):
+                    walk(item, path + "/" + str(key))
+
+        walk(value, "")
+        return value
+
+    def _sorted_publishers(self, value):
+        """Publisher path order is registration order, which a resumed bake does not repeat."""
+        if isinstance(value, dict):
+            out = {}
+            for key, item in value.items():
+                if key == "publishers" and isinstance(item, dict):
+                    out[key] = {
+                        kind: sorted(paths) if isinstance(paths, list) else paths
+                        for kind, paths in item.items()
+                    }
+                else:
+                    out[key] = self._sorted_publishers(item)
+            return out
+        if isinstance(value, list):
+            return [self._sorted_publishers(item) for item in value]
+        return value
+
+    def _drop_holds(self) -> None:
+        """Take the bake's temporary zero grids off the bus before the manifest is hashed.
+
+        They are not part of the sim. Leaving them made a resumed bake (which inherited the
+        holds) record a different publisher list than the uninterrupted bake.
+        """
+        bus = op.simbus  # noqa: F821
+        for kind in ("forces", "sources"):
+            hold = self.ownerComp.op("hold_" + kind)
+            if hold is not None:
+                bus.Unpublish(hold.path)
 
     def _maybe_crop_sim(self, sim, field: str, top, frame: int):
         """Return a cropped atlas TOP for playback fields between keyframes, or `top` unchanged."""
@@ -324,12 +435,16 @@ class Baker:
                     if one.name.startswith("fluid"):
                         held = one.op(field + "_out")
                         state = one.op(field + "_state")
-                        # 2D public outputs are Cache TOPs. Save the solved null and pulse the cache
-                        # so the snapshot matches the file. 3D outputs are selects of an inactive
-                        # cache; StateTops is the atlas SetInit decodes. Saving the 3D null instead
-                        # recooks the solver and writes a volume the resume path cannot decode.
+                        # 2D public outputs are Cache TOPs (they have Replace). 3D outputs are selects
+                        # of an inactive cache; StateTops is the atlas SetInit decodes. Saving the
+                        # 3D null instead recooks the solver and writes a volume resume cannot decode.
                         if state is not None and held is not None and hasattr(held.par, "replace"):
-                            top = state
+                            # The locked Cache TOP is the step the particles sampled and the
+                            # feedback loop captured. Saving `state` instead recooks the solver:
+                            # the particle step has already published new forces, so that cook
+                            # is a different fluid step. Resume then starts from the recook
+                            # while a continuous run starts from the feedback image.
+                            top = held
                     targets.append((one.name, field, top))
         else:
             targets = [(None, field, top) for field, top in self.Sim.StateTops().items()]
@@ -353,29 +468,28 @@ class Baker:
                 if array is not None:
                     import numpy as np  # noqa: PLC0415
                     np.save(path.with_suffix(".npy"), np.ascontiguousarray(array))
-            if sim_name and sim_name.startswith("fluid"):
-                # save() cooks the solved null. Copy that image into the public snapshot
-                # so a replay of the snapshot matches the file.
-                held = op(f"/sims/{sim_name}/{field}_out")  # noqa: F821
-                # 2D public outputs are Cache TOPs (replace pulse). 3D ones are selects of the
-                # cache the step already wrote; they have no replace parameter.
-                if held is not None and hasattr(held.par, "replace"):
-                    held.lock = False
-                    held.par.replace = True
-                    held.par.replaceindex = 0
-                    held.par.replacespulse.pulse()
-                    held.par.replace = False
-                    held.lock = True
         if m.members:
             particles = next((one for one in self._sims() if one.name == "particles"), None)
-            if particles is not None:
-                for field, node_name in (("forces", "forces_2d"), ("sources", "sources_2d")):
+            if particles is not None and particles.par.Bus.eval() != "3d" and (
+                float(particles.par.Couplingstrength.eval()) != 0.0
+                or float(particles.par.Srcheat.eval()) != 0.0
+            ):
+                # Coupled 2D bakes need the frozen splat so the next fluid step matches.
+                # A coupling-off group (the combined scene) does not read that 1024² grid,
+                # and saving it every frame is several gigabytes of zeros.
+                for field, node_name in (("forces", "forces_pub"), ("sources", "sources_pub")):
                     node = particles.op(node_name)
+                    if node is None:
+                        node = particles.op(field + "_2d")
                     if node is None:
                         continue
                     path = self.cache.frame_path(self.CacheDir, field, c.frame, "particles")
                     path.parent.mkdir(parents=True, exist_ok=True)
                     node.save(str(path), asynchronous=asynchronous)
+                    import numpy as np  # noqa: PLC0415
+
+                    image = np.array(node.numpyArray(delayed=False), dtype=np.float32, copy=True)
+                    np.save(path.with_suffix(".npy"), np.ascontiguousarray(image))
         m.frames_written = c.frame - m.frame_start + 1
         self._frames_this_run += 1
         done = c.frame >= m.frame_end
@@ -417,6 +531,24 @@ class Baker:
             project.realTime = self._prev_realtime  # noqa: F821
         m = self.manifest
         m.complete = complete and self.cache.resume_frame(self.CacheDir, m) > m.frame_end
+        if m.complete:
+            # Record the live particle splat, not the frozen copy and not another sim's Bind.
+            # Liquid.Bind publishes the free surface, which this bake deliberately took off the bus.
+            for one in self._sims():
+                if one.name != "particles":
+                    continue
+                bind = getattr(one, "Bind", None)
+                if bind is not None:
+                    bind()
+            self._drop_holds()
+            fresh = self.NewManifest()
+            m.params = self._stabilize_shaders(self._sorted_publishers(fresh.params))
+            m.members = self._stabilize_shaders(self._sorted_publishers(fresh.members))
+            m.frames_written = m.frame_end - m.frame_start + 1
+            boxes = (m.extra or {}).get("bboxes") or {}
+            if boxes:
+                m.extra["bboxes"] = {str(int(k)): [int(v) for v in box] for k, box in boxes.items()}
+            m.param_hash = self.cache.param_hash(m.params)
         self.cache.write_manifest(self.CacheDir, m)
         self.baking = False
         secs = time.perf_counter() - self._t0

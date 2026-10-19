@@ -45,6 +45,24 @@ def _canonical(value):
     return value
 
 
+def text_dat_source(dat) -> str:
+    """Shader text from the synced file.
+
+    A file-synced DAT can reload mid-session and change ``dat.text`` without recompiling the
+    shader the bake already ran. Hashing the file keeps two bakes of one session identical.
+    """
+    try:
+        path = str(dat.par.file.eval() or "")
+    except Exception:
+        path = ""
+    if path:
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except OSError:
+            pass
+    return str(dat.text)
+
+
 def param_hash(params: dict) -> str:
     """Stable 16-hex-digit hash of simulation parameters (key order and float noise beyond 9 digits ignored)."""
     blob = json.dumps(_canonical(params), sort_keys=True, separators=(",", ":"))

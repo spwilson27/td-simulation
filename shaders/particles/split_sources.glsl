@@ -5,6 +5,6 @@ uniform vec4 uSrc;
 out vec4 fragColor;
 void main()
 {
-	float heat = texture(sTD2DInputs[0], vUV.st).a;
+	float heat = texelFetch(sTD2DInputs[0], ivec2(gl_FragCoord.xy), 0).a;
 	fragColor = TDOutputSwizzle(vec4(heat * uSrc.x, heat, 0.0, 0.0));
 }

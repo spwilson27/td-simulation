@@ -382,7 +382,8 @@ def build_liquid(sims, bn):
          ("uTarget", (P + "Targetx", P + "Targety", P + "Targetz", 0)),
          ("uLight", (0.4, 0.85, 0.3, 0)),
          ("uRay", (P + "Raysteps", 0, 0, 0)),
-         ("uLook", (1.2, 0.55, 0.65, 0))],
+         ("uLook", (1.2, 0.55, 0.65, 0)),
+         ("uSmooth", (1.0, 0, 0, 0))],
         P + "Renderw", P + "Renderh", 32, 0, filtering="linear")
     bn.null(f, "render_out", render, 33, 0)
     # Live phi, not the cache: the cache keeps only the first image of a TouchDesigner frame,

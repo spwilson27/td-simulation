@@ -33,49 +33,41 @@ class Fluid2D:
             self.ownerComp.op("loop_" + field).par.index = 1 if reset else 0
 
     def Step(self) -> None:
-        # A Feedback TOP only captures its target on frames where it cooked itself. On reset steps the loop Switch
-        # does not pull it, so cook it explicitly or the next step would replay the state from before the reset.
-        # Unlock the public snapshots first. They are locked at the end of the step so a particle read cannot
-        # recook the solver and move the frame that was just saved.
+        # Cook the solved null, lock it, then copy it into the feedback.
+        # Cooking the feedback while it targets the unlocked state runs the solver an extra time and
+        # captures a different pressure than the one that gets saved, so a resumed step does not match.
+        # The feedback has to cook twice: the first cook can still be showing its previous target.
         for field in STATE:
-            self.ownerComp.op(field + "_out").lock = False
-            self.ownerComp.op(field + "_state").lock = False
-        for field in STATE:
-            self.ownerComp.op("fb_" + field).cook()
-        for field in STATE:
-            self.ownerComp.op(field + "_state").cook()
-        # Snapshot the solved fields into the public *_out Cache TOPs, then set them inactive. A Cache TOP that is
-        # inactive does not cook its input, so a later read of vel_out / scalars_out / pressure_out (the bus, a
-        # viewer, the bake replay) cannot run the feedback loop again. That extra cook used to advance the live
-        # state one step past the frame the baker had just saved. One TouchDesigner frame records a single cache
-        # entry, which is what a timeline bake does. A script that ticks several steps has to call Snapshot().
-        for field in STATE:
-            # Replace Pulse copies the solved null immediately. An Active cook records only one
-            # image per TouchDesigner frame and would leave the bus on the frame loaded at resume.
+            state = self.ownerComp.op(field + "_state")
             held = self.ownerComp.op(field + "_out")
+            state.lock = False
+            state.cook()
+            state.lock = True
             held.lock = False
-            held.par.replace = True
-            held.par.replaceindex = 0
-            held.par.replacespulse.pulse()
-            held.par.replace = False
+            held.cook()
             held.lock = True
+        for field in STATE:
+            held = self.ownerComp.op(field + "_out")
+            fb = self.ownerComp.op("fb_" + field)
+            fb.par.top = held
+            fb.cook(force=True)
+            fb.cook(force=True)
         if self.ownerComp.par.Cookrender.eval():
             self.ownerComp.op("render_out").cook()
 
     def Snapshot(self) -> None:
-        """Store the latest solved frame. Needed when several Ticks run in one script.
+        """Keep the public selects on the step just cooked.
 
-        A size-1 Cache TOP records one image per TouchDesigner frame. The Replace Pulse
-        copies the solved null immediately. Replace is turned off before the function
-        returns so the pulse is not still armed for a later read.
+        The solved null is already locked by Step, so this does not run the solver again.
         """
         for field in STATE:
+            state = self.ownerComp.op(field + "_state")
             held = self.ownerComp.op(field + "_out")
+            if not state.lock:
+                state.cook()
+                state.lock = True
             held.lock = False
-            held.par.replace = True
-            held.par.replaceindex = 0
-            held.par.replacespulse.pulse()
-            held.par.replace = False
+            held.cook()
             held.lock = True
         if self.ownerComp.par.Cookrender.eval():
             self.ownerComp.op("render_out").cook(force=True)
@@ -112,7 +104,9 @@ class Fluid2D:
         """Everything that changes the result, for the cache parameter hash (shader sources and publisher settings)."""
         p = self.ownerComp.par
         bus, clock = op.simbus, op.simclock  # noqa: F821 (td globals)
-        shaders = sorted((d.name, d.text) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
+        import cache  # noqa: PLC0415
+
+        shaders = sorted((d.name, cache.text_dat_source(d)) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
         digest = hashlib.sha256(repr(shaders).encode("utf-8")).hexdigest()[:16]
         return {
             "sim": "fluid2d",

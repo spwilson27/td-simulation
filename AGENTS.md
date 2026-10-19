@@ -133,25 +133,52 @@ DATs file-synced to the repo.
    is byte-identical across cancel/resume. Frame-start positions are locked and the stored velocity is the
    frame average, which is what makes resume match. The fan that feeds the flag is a static force box; it
    must not sample the fluid velocity or the publish cooks in a cycle and the next cloth step collapses.
-8. Integration: scene/preset system, cross-camp showcase scenes, performance pass, render/export outputs, docs.
-   Phase 3 debt to clear here: the deterministic 2D particle splat (`shaders/particles/splat_sum.glsl`) sums all
-   particles in ONE workgroup into a 32×32 grid (coarse coupling, ~45 fps with the 2D fluid in a fresh session, but
-   it fell to ~28 fps, under the 30 fps gate, once when run nested inside validate_phase7 → validate_phase5 --quick,
-   so this gate has no margin); move it to a full-res
-   multi-workgroup fixed-point sum (probe integer image atomics on r32i, else per-tile shared sums + a reduce pass).
-   Particle pos/vel are snapped to 1e-4 under bus advection (`step.glsl`) to hide a sub-ulp difference in the first
-   resumed fluid sample; a coupled group-bake resume still differs by one snap step in a few pvel values
-   (validate_phase3 tolerates ≤ 2.5e-4 in pvel only). Find the real source and make coupled resume byte-exact.
-   Fluid2D also snaps vel/pressure to 1e-5 and scalars to 1e-4 every step (`q_*` / `quantize.glsl`), added for the
-   same reason; test removing it once the splat is deterministic (it costs three passes and kills smoke < 5e-5).
-   Phase 4 debt: playback "upres" is mostly screen grain (it also speckles obstacles) and is validated on an early,
-   small plume. Replace with real detail (wavelet turbulence / advected curl-noise in the volume, masked to smoke)
-   and validate on a developed showcase frame. Multigrid at 256³ costs ~360 ms per projection (2.8 steps/s bake).
-   Phase 6 debt: the raymarch is the particle phi at grid resolution, so the surface is faceted. A script TOP
-   does not round-trip a 3D pressure volume through texelFetch; resume reloads a 2D pack. The bake preview
-   is drawn from that step's phi, not from a GLSL TOP that may already have cooked. Two-way push on rigid
-   pieces is not wired; point `extra_solids` at the destruction obstacle TOP for one-way coupling. APIC is
-   in `python/flip.py` only.
-   Phase 7 debt: two-way coupling stays off in the realtime preset. The gather is one hash bin per bus cell
-   (not a 27-neighbour walk) and its cook cost is reported; it still did not fit the flag frame. The cloth
-   does not publish a thin SDF. The stored velocity is the frame average, not the last substep.
+8. Done: combined scene. `scripts/validate_phase8.py` exited 0 twice in one fresh session
+   (reports/phase8_run1.json and reports/phase8.json). It runs every earlier phase once, each in its
+   own fresh session, and passes `--no-regressions` to phases 4–7 so they do not repeat that chain.
+   Realtime is 480×270, 32³ Jacobi (4), 32 pieces, 128² debris, a tank with free-surface pressure
+   (2 MGPCG iterations), and a banner in the plume. The two windows were 52 fps and 53 fps with steps
+   equal to frames, and both measured the same numbers: smoke alignment 1, 32,768 liquid particles
+   displaced, 817 debris at the break, banner mean deflection 0.124 m. Agents running in parallel
+   share one scratch session; a second agent's `td_scratch.py start` kills the first one's TD mid-run. The showcase bake runs before the other checks so it does
+   not inherit their particle state. It is 48³, 6 Jacobi, 48 pieces, 256² debris, 8 pressure iterations,
+   180 frames, cancel/resume byte-identical, about 0.93 GB. The movie is `cache/exports/phase8_showcase.mp4`,
+   the 180 live `picture_out` frames (480×270), not a scalar slice. The stills at frames 36, 90, and 180 are
+   that same composite rebuilt from the cache and compared with the live grab. Body, particle, and cloth
+   state come from the `.npy` sidecars. Smoke is the CacheReader decode of the stored scalars. The
+   showcase does not crop those atlases: a cropped plume does not raymarch back to the live picture.
+   Liquid phi is not stored. While baking, `Liquid._publish_preview` rebuilds phi from `pos_out` (the
+   particles the frame saves) and that is the only `phi_out` snap of the frame. Outside a bake the step
+   snaps the phi of the particles it started with. A second `_snap` of a Cache TOP in the same
+   TouchDesigner frame is a no-op. The bake used to snap the start-of-step phi first; the preview's
+   width+1 recook then reset the cache by accident, and the still (rebuilt from the previous frame's
+   particles) differed on ~2.7k liquid pixels while solids, plate and camera were byte-identical. The
+   still now cooks phi from that frame's particles, and the gate is replay max abs 0 at frames 36, 90,
+   and 180, with each rebuilt neighbour frame (37, 91, 179) differing from the live picture. After the
+   other checks the validator stops, starts, and rebuilds the scratch session, bakes frames 1–40 again,
+   and requires every file byte-identical to `cache/phase8_showcase`. The manifest has to match too,
+   except `frame_end` and `frames_written`; it stores no timing. The realtime interaction numbers
+   (`scene.numbers`) must equal the first pass (`reports/phase8_run1.json`). A second cook of `picture_out` after the save does not repeat the
+   picture OnStep just cooked, and `delayed=True` returns the previous download, so the grab is queued
+   in the tick script and stored under the frame that produced it. Debris lifetime is the particle
+   Lifemax (the burst texture's w), 4–8 s in this scene, so the late still still has sparks. Debris is
+   in the composite; a fifth input on the four-input scene shader does not compile, so a second TOP
+   adds the particle beauty.
+   The 40-frame phase 3 group bake is byte-exact. The fluid step was recooking the live particle splat
+   while resume read the saved grid. The published grid is a locked float32 copy, and resume loads its
+   `.npy`. A 3D group does not save that 2D grid. Time is `step * dt` from the integer step, never a
+   running sum. Jacobi reads the pressure warm start with `texelFetch`. A 3D cache left wired to the
+   solver recooks mid-write and stores the border checker (0 and about 0.7); `Fluid3D.Step` locks the
+   cache, then disconnects it. Unlocking a disconnect collapses the volume to one slice.
+   The liquid steps before the smoke so a reset does not sample the previous run's surface. That surface
+   is not a smoke obstacle: rebuilding it from saved particles is not bit-identical and the pressure
+   solve diverges. Pieces still push the liquid. `Scenes.Apply` pins the destruction seed, the fluid
+   combustion and wind values, the debris particle parameters, and rebuilds the banner mesh, so an
+   earlier preset in the same process cannot change the scene.
+   Remaining debt: cloth has no thin SDF, the liquid does not push the pieces, cloth two-way coupling
+   is off, `Fluiddrag` is 0, and the debris heat splat is off in the combined scene.
+   A file-synced DAT can reload between two bakes and change `dat.text` without recompiling. The manifest
+   hashes the file, and the baker keeps the first digest it recorded for each sim so the two manifests match.
+   The 2D splat is a full-resolution fixed-point sum. Coupled 2D+particles at 1024² is about 46–57 fps
+   with the render on, steps equal frames. Playback detail warps the smoke sample only. The liquid picture
+   blurs phi by one cell (`uSmooth`). `validate_phase7.py --quick` skips the 180-frame cloth showcase.

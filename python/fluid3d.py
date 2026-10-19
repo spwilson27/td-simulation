@@ -4,7 +4,9 @@ Same clock/baker contract as Fluid2D: BeginStep, Step, StateTops, StateFormats, 
 
 Persistent state is a pair of Cache TOPs per field, ping-ponged through a Select. A Feedback TOP does not
 capture 3D textures on this GPU (it passes its input through), which is why this is not the 2D pattern.
-Public *_out selects point at the cache written this step; an inactive Cache TOP does not recook the solver.
+The cache is disconnected after each snapshot. Left wired, it recooks from the solver mid-step and the
+3D sampler returns the border checker on the first slice. Public *_out selects point at the cache
+written this step.
 """
 
 from __future__ import annotations
@@ -90,12 +92,23 @@ class Fluid3D:
             self.ownerComp.op(field + "_state").cook()
         write = 0 if self._reset else 1 - self._read_slot
         for field in STATE:
+            state = self.ownerComp.op(field + "_state")
             hold = self.ownerComp.op(f"hold_{field}_{write}")
+            # A cache left wired to the solver recooks while that solver is still writing. Sampling
+            # the in-progress volume returns the 3D border checker, and the next step stores it.
+            # Unlock before the capture. Lock afterwards, then disconnect. Disconnecting an
+            # unlocked 3D cache collapses it to a single slice; a locked one keeps the volume
+            # and does not recook when the solver runs.
+            hold.lock = False
+            if not hold.inputConnectors[0].connections:
+                state.outputConnectors[0].connect(hold.inputConnectors[0])
             hold.par.replace = True
             hold.par.replaceindex = 0
             hold.par.active = True
             hold.cook(force=True)
             hold.par.active = False
+            hold.lock = True
+            hold.inputConnectors[0].disconnect()
             self.ownerComp.op(field + "_out").par.top = hold.path
         self.ownerComp.store("slot", write)
         self._reset = False
@@ -128,7 +141,9 @@ class Fluid3D:
     def Params(self) -> dict:
         p = self.ownerComp.par
         bus, clock = op.simbus3d, op.simclock  # noqa: F821
-        shaders = sorted((d.name, d.text) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
+        import cache  # noqa: PLC0415
+
+        shaders = sorted((d.name, cache.text_dat_source(d)) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
         digest = hashlib.sha256(repr(shaders).encode("utf-8")).hexdigest()[:16]
         return {
             "sim": "fluid3d",

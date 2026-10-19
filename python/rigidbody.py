@@ -52,6 +52,15 @@ def quat_integrate(q: np.ndarray, omega: np.ndarray, dt: float) -> np.ndarray:
     return quat_normalize(q + 0.5 * float(dt) * quat_mul(wq, q))
 
 
+def _cross(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """3-vector cross. numpy.cross spends most of its time in moveaxis on this size."""
+    return np.array((
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ), dtype=np.float64)
+
+
 def _unit(v: np.ndarray) -> np.ndarray:
     n = float(np.linalg.norm(v))
     if n <= _EPS:
@@ -256,7 +265,7 @@ class World:
         body.aabb_max = v.max(axis=0)
 
     def _point_velocity(self, body: Body, point: np.ndarray) -> np.ndarray:
-        return body.lin + np.cross(body.ang, point - body.pos)
+        return body.lin + _cross(body.ang, point - body.pos)
 
     def _inv_inertia_world(self, body: Body) -> np.ndarray:
         cached = getattr(body, "_invIw", None)
@@ -287,16 +296,16 @@ class World:
             return
         body.lin = body.lin + impulse * body.inv_mass
         r = point - body.pos
-        body.ang = body.ang + self._inv_inertia_world(body) @ np.cross(r, impulse)
+        body.ang = body.ang + self._inv_inertia_world(body) @ _cross(r, impulse)
 
     def _effective(self, a: Body, b: Body | None, point: np.ndarray, direction: np.ndarray) -> float:
         kn = a.inv_mass
         if a.inv_mass > 0.0:
-            ra = np.cross(point - a.pos, direction)
+            ra = _cross(point - a.pos, direction)
             kn += float(np.dot(ra, self._inv_inertia_world(a) @ ra))
         if b is not None and b.inv_mass > 0.0:
             kn += b.inv_mass
-            rb = np.cross(point - b.pos, direction)
+            rb = _cross(point - b.pos, direction)
             kn += float(np.dot(rb, self._inv_inertia_world(b) @ rb))
         return max(kn, 1e-10)
 

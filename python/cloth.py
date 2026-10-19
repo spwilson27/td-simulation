@@ -797,7 +797,9 @@ class Cloth:
         p = self._par()
         clock = op.simclock  # noqa: F821
         bus = op.simbus3d  # noqa: F821
-        shaders = sorted((d.name, d.text) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
+        import cache  # noqa: PLC0415
+
+        shaders = sorted((d.name, cache.text_dat_source(d)) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
         digest = hashlib.sha256(repr(shaders).encode("utf-8")).hexdigest()[:16]
         nx, ny = int(p.Resx.eval()), int(p.Resy.eval())
         return {

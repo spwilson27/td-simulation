@@ -12,6 +12,15 @@ uniform vec4 uSmoke;    // rgb albedo, a background
 uniform vec4 uRay;      // x step count
 uniform vec4 uDetail;   // strength, frequency, advect, unused. Strength 0 leaves the cached field unchanged.
 
+// texture() on these 3D inputs in a pixel shader follows the mip chain. The volumes have no
+// mips, and the missing level comes back as the checker. texelFetch stays on level 0.
+vec4 volTexel(sampler3D tex, vec3 uv)
+{
+	ivec3 size = textureSize(tex, 0);
+	ivec3 ijk = clamp(ivec3(clamp(uv, vec3(0.0), vec3(1.0)) * vec3(size)), ivec3(0), size - ivec3(1));
+	return texelFetch(tex, ijk, 0);
+}
+
 vec3 busSize() { return uBMax.xyz - uBMin.xyz; }
 vec3 busWorldToUV(vec3 p) { return (p - uBMin.xyz) / busSize(); }
 bool busOutside(vec3 uv) { return any(lessThan(uv, vec3(0.0))) || any(greaterThan(uv, vec3(1.0))); }
@@ -56,7 +65,7 @@ float upresDensity(vec3 uv, float dens, float temp)
 		return dens;
 	vec3 flow = vec3(0.0);
 	if (TD_NUM_3D_INPUTS > 3)
-		flow = texture(sTD3DInputs[3], uv).xyz * uDetail.z;
+		flow = volTexel(sTD3DInputs[3], uv).xyz * uDetail.z;
 	vec3 q = uv * max(uDetail.y, 1.0) + flow * uClock.y;
 	// Warp the sample across the plume. A zero-mean displacement moves edges without shifting
 	// the low-passed shape, and it is not averaged away by the ray integral the way additive noise is.
@@ -64,20 +73,26 @@ float upresDensity(vec3 uv, float dens, float temp)
 		valueNoise(q),
 		valueNoise(q + vec3(4.2, 1.7, 0.3)),
 		valueNoise(q + vec3(1.1, 8.4, 2.9))) - 0.5;
-	float amp = uDetail.x * 0.012 * (0.45 + 0.15 * temp);
+	float amp = uDetail.x * 0.035 * (0.55 + 0.2 * temp);
 	vec3 uv2 = clamp(uv + warp * amp, vec3(0.0), vec3(1.0));
-	return max(texture(sTD3DInputs[0], uv2).r, 0.0);
+	float warped = max(volTexel(sTD3DInputs[0], uv2).r, 0.0);
+	// Second octave, multiplied into the smoke that was actually sampled. Empty cells stay empty,
+	// and this never touches the obstacle branch.
+	float hi = valueNoise(q * 2.7 + vec3(3.1, 0.4, 1.7)) - 0.5;
+	float hi2 = valueNoise(q * 5.3 + vec3(0.2, 4.8, 2.2)) - 0.5;
+	float modulate = 1.0 + uDetail.x * (0.55 * hi + 0.28 * hi2);
+	return warped * max(modulate, 0.0);
 }
 
 vec3 sdfGrad(vec3 uv)
 {
 	vec3 t = 1.0 / vec3(textureSize(sTD3DInputs[1], 0));
-	float dx = texture(sTD3DInputs[1], clamp(uv + vec3(t.x, 0, 0), 0.0, 1.0)).r
-	         - texture(sTD3DInputs[1], clamp(uv - vec3(t.x, 0, 0), 0.0, 1.0)).r;
-	float dy = texture(sTD3DInputs[1], clamp(uv + vec3(0, t.y, 0), 0.0, 1.0)).r
-	         - texture(sTD3DInputs[1], clamp(uv - vec3(0, t.y, 0), 0.0, 1.0)).r;
-	float dz = texture(sTD3DInputs[1], clamp(uv + vec3(0, 0, t.z), 0.0, 1.0)).r
-	         - texture(sTD3DInputs[1], clamp(uv - vec3(0, 0, t.z), 0.0, 1.0)).r;
+	float dx = volTexel(sTD3DInputs[1], clamp(uv + vec3(t.x, 0, 0), 0.0, 1.0)).r
+	         - volTexel(sTD3DInputs[1], clamp(uv - vec3(t.x, 0, 0), 0.0, 1.0)).r;
+	float dy = volTexel(sTD3DInputs[1], clamp(uv + vec3(0, t.y, 0), 0.0, 1.0)).r
+	         - volTexel(sTD3DInputs[1], clamp(uv - vec3(0, t.y, 0), 0.0, 1.0)).r;
+	float dz = volTexel(sTD3DInputs[1], clamp(uv + vec3(0, 0, t.z), 0.0, 1.0)).r
+	         - volTexel(sTD3DInputs[1], clamp(uv - vec3(0, 0, t.z), 0.0, 1.0)).r;
 	return vec3(dx, dy, dz);
 }
 
@@ -130,20 +145,20 @@ void main()
 		vec3 uv = busWorldToUV(p);
 		if (!busOutside(uv))
 		{
-			float sd = texture(sTD3DInputs[1], uv).r;
+			float sd = volTexel(sTD3DInputs[1], uv).r;
 			if (sd < 0.0)
 			{
 				vec3 n = normalize(sdfGrad(uv) + vec3(0.0, 1e-4, 0.0));
 				float ndl = clamp(dot(n, light), 0.0, 1.0);
-				float sh = clamp(texture(sTD3DInputs[2], uv).r, 0.0, 1.0);
+				float sh = clamp(volTexel(sTD3DInputs[2], uv).r, 0.0, 1.0);
 				vec3 surf = vec3(0.42, 0.44, 0.48) * (0.22 + 0.78 * ndl) * mix(0.4, 1.0, sh);
 				col += trans * surf * uLook.w;
 				break;
 			}
-			vec4 s = texture(sTD3DInputs[0], uv);
+			vec4 s = volTexel(sTD3DInputs[0], uv);
 			float temp = max(s.g, 0.0);
 			float dens = upresDensity(uv, max(s.r, 0.0), temp);
-			float sh = clamp(texture(sTD3DInputs[2], uv).r, 0.0, 1.0);
+			float sh = clamp(volTexel(sTD3DInputs[2], uv).r, 0.0, 1.0);
 			float absorb = dens * uLook.x * dt;
 			float stepT = exp(-absorb);
 			vec3 emit = (blackbody(temp / max(uLook.z, 0.2)) * uLook.y * temp + uSmoke.rgb * dens * 0.9) * sh;
@@ -151,16 +166,6 @@ void main()
 			trans *= stepT;
 		}
 		t += dt;
-	}
-	if (uDetail.x > 0.0)
-	{
-		// Pixel-scale grain on the smoke the ray actually hit. The ray integral washes out
-		// additive volume noise; this is the part that raises the picture's high frequencies.
-		vec3 mapped = clamp(col, 0.0, 1.0);
-		float presence = clamp(length(mapped) * 10.0, 0.0, 1.0);
-		float g = valueNoise(vec3(gl_FragCoord.xy * 0.85, uDetail.y * 0.11)) - 0.5;
-		mapped += presence * uDetail.x * g * vec3(0.40, 0.13, 0.03);
-		col = clamp(mapped, 0.0, 1.0);
 	}
 	col = col + bg * trans;
 	fragColor = TDOutputSwizzle(vec4(clamp(col, 0.0, 4.0), 1.0));

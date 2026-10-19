@@ -593,11 +593,49 @@ op.simclock.par.Sims = '/sims/fluid3d /sims/cloth'
 
 `scripts/validate_phase7.py` is the gate. `validate_phase6.py --quick` skips that phase's showcase bake.
 
+## Combined scene
+
+`/sims/scenes` applies one preset to every sim and composites volume, pieces, liquid, debris, and the banner. `picture_out` is that picture.
+
+```python
+op('/sims/scenes').Apply('realtime')   # or 'showcase'
+# picture is /sims/scenes/picture_out
+```
+
+Realtime is 480×270: a 32³ Jacobi fire (4 iterations), a 32-piece wall, 128² debris, a liquid tank with free-surface pressure on (2 MGPCG iterations), and a banner in the plume. Nothing in that list is bypassed. The two validation passes held 52 fps and 53 fps with one step per frame. Both measured the same interaction numbers: the smoke followed the moving pieces (alignment 1.0), 32,768 liquid particles left their start, the break emitted 817 debris, and the banner's mean deflection was 0.124 m.
+
+The liquid steps before the smoke. On a reset the fluid would otherwise read whatever surface the previous run had left behind. The free surface is not published as a smoke obstacle: a resumed step rebuilds it from saved particles, and that field is not bit-identical to the live one, so the pressure solve would diverge. Pieces still push the liquid through `extra_solids`. Debris do not splat heat (`Srcheat` 0). `Fluiddrag` stays 0. The banner does not write a force back.
+
+`Apply('showcase')` is the same arrangement at 48³, 6 Jacobi iterations, 48 pieces, 256² debris, and 8 pressure iterations. Debris lives 4–8 s, so it is still in the frame at the end of the shot. `scripts/validate_phase8.py` bakes 180 frames, cancels, resumes, and requires the two caches to match byte for byte. Scalars are stored full-frame so the raymarch matches the cache. That cache is about 0.93 GB.
+
+During that bake the validator saves every live `picture_out` frame to `cache/exports/frames/`. The movie `cache/exports/phase8_showcase.mp4` is those 180 composite frames, H.264, 24 fps, 480×270. The movie and the frame sequence are gitignored.
+
+The stills `reports/phase8_showcase_a.png`, `phase8_showcase_b.png`, `phase8_showcase_c.png`, and `reports/phase8_showcase_sheet.png` are not grabs. They are the 480×270 composite rebuilt from the cache alone at frames 36, 90, and 180. Body, particle, cloth, and liquid particle state come from the `.npy` sidecars. Smoke comes through `CacheReader`. The liquid surface is recooked from that frame's saved particles. Each rebuilt still has to equal the live composite of the same frame exactly (max abs difference 0). As a witness, the rebuilt neighbour frame (37, 91, 179) has to differ from it.
+
+While baking, the liquid snaps `phi_out` once per frame, after `phi` has been rebuilt from the particles that frame saves. Outside a bake, `phi_out` is the surface of the particles the step started from, which skips a second sort and P2G pass. A Cache TOP keeps only its first snap of a TouchDesigner frame, so the bake does not snap the start-of-step surface first.
+
+Reproducibility: the validator then stops the scratch session, starts a fresh one, rebuilds the network, and bakes frames 1–40 of the showcase again from a reset. Every cache file for those frames has to be byte-identical to `cache/phase8_showcase`. The manifests have to match too, except `frame_end` and `frames_written`; the manifest records no timing. The realtime interaction numbers come from a fixed tick count, so they are stored under `scene.numbers` in `reports/phase8.json`. The second pass of the protocol compares them with `reports/phase8_run1.json`.
+
+The checker that used to sit on the right of the volume was the 3D cache recooking while the solver was still writing. The sampler returned the border pattern (0 and about 0.7) on the first slice, and the next step stored it. The cache is locked, then disconnected. Disconnecting it without the lock collapses the volume to one slice.
+
+The 2D particle coupling splat is full resolution. A fresh group bake clears the previous force grid before the first fluid step. The grid that gets saved is a locked float32 copy, with a `.npy` beside the EXR, because the live splat recooks from the particles and does not match the saved frame. Particles on the 3D bus do not write that 2D grid into the cache.
+
+### Combined realtime cost
+
+One fresh session, `project.realTime` off, 480×270, steps equal to frames, 52–58 fps across runs. The stage timers are one instrumented tick and under-count the wall clock (53 fps is about 19 ms).
+
+| Stage | ms |
+| --- | --- |
+| destruction, 32 pieces, 1 impulse iteration | 7 |
+| liquid, 2 MGPCG iterations | 3 |
+| fluid 32³ Jacobi 4 | 0.5 |
+| banner | 0.8 |
+| debris 128² | 0.2 |
+| composite | 0.1 |
+
 ## Roadmap
 
-Later phases add the scene layer on top of these solvers:
-
-- Integration. One combined scene with smoke, particles, destruction, liquid, and cloth, plus the debt list in AGENTS.md.
+Cloth is not a thin obstacle on the bus, and the liquid does not push back on the rigid pieces. The banner's two-way coupling stays off in the combined scene. `Fluiddrag` (smoke pushing pieces) is 0, and debris does not splat heat into the smoke there. Those are the remaining coupling gaps. The debt list in AGENTS.md is the detailed record.
 
 ## Benchmarks
 

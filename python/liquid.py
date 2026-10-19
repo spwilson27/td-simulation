@@ -274,14 +274,26 @@ class Liquid:
             comp.store("pcg_history", [])
             comp.store("pcg_iters_used", 0)
             return
-        tail = comp.op("pcg_rel")
-        solved = comp.op("pcg_x")
-        if tail is None or solved is None:
-            return
-        tail.cook(force=True)
-        import numpy as np  # noqa: PLC0415
+        iters = int(comp.par.Pcgiters.eval()) if hasattr(comp.par, "Pcgiters") else PCG_STEPS
+        iters = min(PCG_STEPS, max(1, iters))
+        # Cooking pcg_rel pulls all eight unrolled iterations. A shorter count cooks cgx{n-1}
+        # and leaves the tail untouched, so the parameter actually shortens the frame.
+        if iters >= PCG_STEPS:
+            tail = comp.op("pcg_rel")
+            solved = comp.op("pcg_x")
+            if tail is None or solved is None:
+                return
+            tail.cook(force=True)
+            import numpy as np  # noqa: PLC0415
 
-        rel = float(np.reshape(np.asarray(tail.numpyArray(delayed=False)), -1)[0])
+            rel = float(np.reshape(np.asarray(tail.numpyArray(delayed=False)), -1)[0])
+            history = [rel]
+        else:
+            solved = comp.op(f"cgx{iters - 1}")
+            if solved is None:
+                return
+            solved.cook(force=True)
+            history = []
         # Project reads the snapshot, not the live chain. Retargeting the warm start marks
         # the chain dirty; the gradient must not cook that second solve.
         hold = self._ensure_pressure_out()
@@ -296,8 +308,8 @@ class Liquid:
         self._fill_lock(write, solved)
         self._point("p_warm", comp.op(write))
         comp.store("p_read", write)
-        comp.store("pcg_history", [rel])
-        comp.store("pcg_iters_used", PCG_STEPS)
+        comp.store("pcg_history", history)
+        comp.store("pcg_iters_used", iters)
 
     def PressureHistory(self) -> list:
         stored = self.ownerComp.fetch("pcg_history", None)
@@ -327,10 +339,17 @@ class Liquid:
             out.cook(force=True)
             out.lock = True
         self.ownerComp.op("phi").cook(force=True)
-        self._snap("phi_out")
+        # phi_out is a cache: only its first snap in a TouchDesigner frame sticks. A bake
+        # snaps it in _publish_preview, from the particles the frame saves.
+        if not self._baking():
+            self._snap("phi_out")
         self._publish_preview()
         if self.ownerComp.par.Cookrender.eval():
             self.ownerComp.op("render").cook(force=True)
+
+    def _baking(self) -> bool:
+        baker = op("/sims/baker")  # noqa: F821
+        return baker is not None and bool(getattr(getattr(baker, "ext", None), "Baker", None) and baker.ext.Baker.baking)
 
     def _publish_preview(self) -> None:
         """Write this step's mid-depth slice into the bake hold.
@@ -340,9 +359,7 @@ class Liquid:
         resumed file repeated that frame. The bake reads phi, which this step just cooked.
         """
         src = self.ownerComp.op("preview")
-        baker = op("/sims/baker")  # noqa: F821
-        baking = baker is not None and bool(getattr(getattr(baker, "ext", None), "Baker", None) and baker.ext.Baker.baking)
-        if not baking:
+        if not self._baking():
             if src is not None:
                 src.cook(force=True)
             return
@@ -363,6 +380,9 @@ class Liquid:
             phi_top.cook(force=True)
             par.expr = expr
             phi_top.cook(force=True)
+            # A baked frame's picture is the surface of the particles it saves, so a still
+            # rebuilt from that frame's cache draws the same phi.
+            self._snap("phi_out")
             phi = np.asarray(phi_top.numpyArray(delayed=False))
         finally:
             par.expr = expr
@@ -518,7 +538,9 @@ class Liquid:
     def Params(self) -> dict:
         p = self.ownerComp.par
         bus, clock = self._bus(), op.simclock  # noqa: F821
-        shaders = sorted((d.name, d.text) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
+        import cache  # noqa: PLC0415
+
+        shaders = sorted((d.name, cache.text_dat_source(d)) for d in self.ownerComp.findChildren(type=textDAT, depth=1))  # noqa: F821
         digest = hashlib.sha256(repr(shaders).encode("utf-8")).hexdigest()[:16]
         return {
             "sim": "liquid",

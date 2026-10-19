@@ -703,15 +703,20 @@ print('@@JSON@@' + json.dumps({'frame': frame, 'err': f.op('render').errors() or
     report["cache_bytes_mid"] = require_budget()
 
     td.run_json(CLEAN, timeout=30)
-    phase1 = subprocess.run([sys.executable, str(ROOT / "scripts" / "bake_check.py"), "--frames", "40"], cwd=ROOT)
-    report["bake_check"] = phase1.returncode
-    print("bake_check", phase1.returncode)
-    phase2 = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate_phase2.py")], cwd=ROOT)
-    report["phase2"] = phase2.returncode
-    print("phase2", phase2.returncode)
-    phase3 = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate_phase3.py")], cwd=ROOT)
-    report["phase3"] = phase3.returncode
-    print("phase3", phase3.returncode)
+    # --no-regressions is for a caller that runs every earlier phase itself, each in a fresh session.
+    if "--no-regressions" in sys.argv:
+        report["regressions"] = "run by the caller"
+        report["bake_check"] = report["phase2"] = report["phase3"] = 0
+    else:
+        phase1 = subprocess.run([sys.executable, str(ROOT / "scripts" / "bake_check.py"), "--frames", "40"], cwd=ROOT)
+        report["bake_check"] = phase1.returncode
+        print("bake_check", phase1.returncode)
+        phase2 = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate_phase2.py")], cwd=ROOT)
+        report["phase2"] = phase2.returncode
+        print("phase2", phase2.returncode)
+        phase3 = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate_phase3.py")], cwd=ROOT)
+        report["phase3"] = phase3.returncode
+        print("phase3", phase3.returncode)
     shaders = subprocess.run([sys.executable, str(ROOT / "scripts" / "check_shaders.py")], cwd=ROOT)
     report["shaders"] = shaders.returncode
     tests = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=ROOT)

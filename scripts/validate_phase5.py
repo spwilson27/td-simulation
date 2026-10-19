@@ -698,14 +698,19 @@ print('@@JSON@@' + json.dumps({'frames': [31, 91, 151], 'paths': paths}))
             return 1
         return script(*args)
 
-    report["bake_check"] = fresh(str(ROOT / "scripts" / "bake_check.py"), "--frames", "40")
-    print("bake_check", report["bake_check"])
-    report["phase2"] = fresh(str(ROOT / "scripts" / "validate_phase2.py"))
-    print("phase2", report["phase2"])
-    report["phase3"] = fresh(str(ROOT / "scripts" / "validate_phase3.py"))
-    print("phase3", report["phase3"])
-    report["phase4"] = fresh(str(ROOT / "scripts" / "validate_phase4.py"), "--quick")
-    print("phase4", report["phase4"])
+    # --no-regressions is for a caller that runs every earlier phase itself, each in a fresh session.
+    if "--no-regressions" in sys.argv:
+        report["regressions"] = "run by the caller"
+        report["bake_check"] = report["phase2"] = report["phase3"] = report["phase4"] = 0
+    else:
+        report["bake_check"] = fresh(str(ROOT / "scripts" / "bake_check.py"), "--frames", "40")
+        print("bake_check", report["bake_check"])
+        report["phase2"] = fresh(str(ROOT / "scripts" / "validate_phase2.py"))
+        print("phase2", report["phase2"])
+        report["phase3"] = fresh(str(ROOT / "scripts" / "validate_phase3.py"))
+        print("phase3", report["phase3"])
+        report["phase4"] = fresh(str(ROOT / "scripts" / "validate_phase4.py"), "--quick")
+        print("phase4", report["phase4"])
     report["shaders"] = script(str(ROOT / "scripts" / "check_shaders.py"))
     report["pytest"] = script("-m", "pytest", "-q")
     td = attach()

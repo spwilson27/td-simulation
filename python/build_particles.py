@@ -185,7 +185,8 @@ def build_particles(sims, bn):
     names = (
         "uniforms", "hash", "spawn", "init", "step", "integrate2d", "integrate3d", "deposit2d", "deposit3d",
         "splat_vert", "splat_frag", "beauty_vert", "beauty_frag", "split_forces", "split_sources", "extract3d",
-        "emissive", "opaque", "clamp_rgb", "splat_sum",
+        "emissive", "opaque", "clamp_rgb", "splat_common", "splat_count", "splat_scan", "splat_base",
+        "splat_scatter", "splat_sum", "splat_part", "splat_fence",
     )
     src = {}
     for i, name in enumerate(names):
@@ -287,31 +288,57 @@ def build_particles(sims, bn):
     splat_h = "op.simbus.par.Resh if parent().par.Bus.menuIndex == 0 else parent().par.Atlash"
     splat_geo = _point_geo(bn, f, "splat_geo", splat_mat, 14, 0)
     _render(bn, f, "splat_render", splat_geo, cam, 15, 0, splat_w, splat_h)
-    # 2D coupling is summed in integer shared memory so the bake is byte-stable. The point splat stays for 3D.
-    splat_sum = bn.place(f.create(td.glslTOP, "splat_sum"), 15, 5)
-    splat_sum.par.mode = "compute"
-    splat_sum.par.computedat = src["splat_sum"]
-    splat_sum.par.glslversion = "glsl460"
-    splat_sum.par.format = "rgba32float"
-    splat_sum.par.outputresolution = "custom"
-    # One workgroup. A bus-sized dispatch races and the coupled bake stops being byte-stable.
-    splat_sum.par.resolutionw = 32
-    splat_sum.par.resolutionh = 32
-    splat_sum.par.outputaccess = "writeonly"
-    splat_sum.par.inputfiltertype = "nearest"
-    splat_sum.par.filtertype = "nearest"
-    wire(splat_sum, [f.op("deposit"), f.op("pos_out")])
-    set_uniforms(splat_sum, [
-        ("uMode", (0, 0, 0, 0)),
+    # 2D coupling is a full-resolution fixed-point sum. This GPU's GLSL TOP has no r32i
+    # image, so the sum is shared-memory histograms, a scan, and a per-tile reduce.
+    # The point splat stays for 3D.
+    splat_u = [
         ("uBounds", BOUNDS2),
-        ("uBMin", BMIN),
-        ("uBMax", BMAX),
-        ("uAtlas", (P + "Atlascols", P + "Atlasrows", "op.simbus3d.par.Resw", "op.simbus3d.par.Resh")),
-        ("uAtlas2", (P + "Atlasw", P + "Atlash", "op.simbus3d.par.Resd", 0)),
         ("uRes", ("op.simbus.par.Resw", "op.simbus.par.Resh", 0, 0)),
-        ("uQuant", (1000000.0, 0, 0, 0)),
-    ])
-    undock(splat_sum)
+        ("uTile", ("max(1, int(op.simbus.par.Resw/32))", "max(1, int(op.simbus.par.Resh/32))", 32, 32)),
+        ("uPart", (P + "Resx", P + "Resy", 0, 0)),
+    ]
+    part_u = [("uPart", (P + "Resx", P + "Resy", 0, 0))]
+    sum_u = [
+        ("uRes", ("op.simbus.par.Resw", "op.simbus.par.Resh", 0, 0)),
+        ("uTile", ("max(1, int(op.simbus.par.Resw/32))", "max(1, int(op.simbus.par.Resh/32))", 32, 32)),
+        ("uPart", (P + "Resx", P + "Resy", 0, 0)),
+    ]
+
+    def splat_compute(name, shader, inputs, col, row, res_w, res_h, fmt="rgba32float", uniforms=None):
+        top = bn.place(f.create(td.glslTOP, name), col, row)
+        top.par.mode = "compute"
+        top.par.computedat = shader
+        top.par.glslversion = "glsl460"
+        top.par.format = fmt
+        top.par.outputresolution = "custom"
+        if isinstance(res_w, int):
+            top.par.resolutionw = res_w
+            top.par.resolutionh = res_h
+        else:
+            top.par.resolutionw.expr = res_w
+            top.par.resolutionh.expr = res_h
+        top.par.outputaccess = "writeonly"
+        top.par.inputfiltertype = "nearest"
+        top.par.filtertype = "nearest"
+        wire(top, inputs)
+        set_uniforms(top, splat_u if uniforms is None else uniforms)
+        undock(top)
+        return top
+
+    part_w, part_h = P + "Resx", P + "Resy"
+    bus_w, bus_h = "op.simbus.par.Resw", "op.simbus.par.Resh"
+    splat_count = splat_compute("splat_count", src["splat_count"], [f.op("deposit"), f.op("pos_out")],
+                                15, 5, part_w, part_h)
+    splat_scan = splat_compute("splat_scan", src["splat_scan"], [splat_count], 15, 6, part_w, part_h, uniforms=part_u)
+    splat_base = splat_compute("splat_base", src["splat_base"], [splat_count], 15, 7, 32, 32, "rg32float", part_u)
+    splat_scatter = splat_compute("splat_scatter", src["splat_scatter"],
+                                  [f.op("deposit"), f.op("pos_out"), splat_scan, splat_base],
+                                  15, 8, part_w, part_h)
+    splat_sum = splat_compute("splat_sum", src["splat_sum"], [splat_scatter, splat_base], 16, 5, bus_w, bus_h, uniforms=sum_u)
+    fence_u = [("uUnused", (0, 0, 0, 0))]
+    splat_part = splat_compute("splat_part", src["splat_part"], [splat_sum], 16, 6,
+                               "max(1, int(op.simbus.par.Resw/16))", "max(1, int(op.simbus.par.Resh/16))", uniforms=fence_u)
+    splat_compute("splat_fence", src["splat_fence"], [splat_part], 16, 7, 1, 1, uniforms=fence_u)
 
     forces = particle_glsl(bn, f, "forces_2d", src["split_forces"], [splat_sum], [("uUnused", (0, 0, 0, 0))],
                            16, 0, "me.inputs[0].width", "me.inputs[0].height")

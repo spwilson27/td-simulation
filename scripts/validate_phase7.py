@@ -9,6 +9,7 @@ import json
 import shutil
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -32,7 +33,8 @@ from cloth import (  # noqa: E402
 REPORTS = ROOT / "reports"
 CACHE_BUDGET = 30 * (1024 ** 3)
 SHOWCASE_BUDGET = 3 * (1024 ** 3)
-KEEP = {"phase3_showcase", "phase4_showcase", "phase5_showcase", "phase6_showcase", "phase7_showcase"}
+KEEP = {"phase3_showcase", "phase4_showcase", "phase5_showcase", "phase6_showcase", "phase7_showcase",
+        "phase8_showcase", "exports"}
 
 
 def cache_bytes() -> int:
@@ -273,7 +275,7 @@ def reference_steps(pos, vel, inv, rest, bits, steps, substeps, compliance, grav
     return pos, vel
 
 
-def main() -> int:
+def main(quick: bool = False, regressions: bool = True) -> int:
     td = attach()
     report = {"cache_bytes_start": require_budget()}
     td.run_json(CLEAN, timeout=60)
@@ -848,104 +850,110 @@ print('@@JSON@@' + json.dumps({'pos_max_abs': min(diff, diff_flip)}))
         if path.exists():
             shutil.rmtree(path)
 
-    show = ROOT / "cache" / "phase7_showcase"
-    if show.exists():
-        shutil.rmtree(show)
-    td.run_json(r'''
-import json
-op('/sims/clock/tick').par.active = False
-c = op('/sims/cloth')
-c.ApplyPreset('showcase')
-c.par.Cookrender = False
-op.simclock.par.Sims = '/sims/cloth'
-op.simclock.par.Substeps = 1
-op.simclock.par.Fps = 60
-b = op('/sims/baker')
-b.par.Sim = '/sims/cloth'
-b.par.Groupsims = '/sims/cloth'
-b.par.Cachedir = 'cache/phase7_showcase'
-b.par.Framestart = 1
-b.par.Frameend = 180
-b.par.Warmup = 0
-b.par.Resume = False
-b.par.Keyinterval = 15
-b.par.Playbackfields = 'pos'
-b.par.Crop = False
-b.par.Asyncsave = False
-b.Bake()
-print('@@JSON@@' + json.dumps({'baking': b.ext.Baker.baking, 'status': str(b.par.Status.eval())}))
-''', timeout=60)
-    report["showcase_bake"] = pump(td, None, 2, 120)
-    manifest_path = show / "manifest.json"
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
-    member = (manifest.get("members") or {}).get("cloth") or {}
-    params = member.get("params") or manifest.get("params") or {}
-    if isinstance(params, dict) and "cloth" in params and "vertices" not in params:
-        params = params["cloth"]
-    show_bytes = sum(p.stat().st_size for p in show.rglob("*") if p.is_file()) if show.exists() else 0
-    saved = []
-    for frame in (30, 90, 150):
-        shot = td.run_json(rf'''
-import json
-import numpy as np
-c = op('/sims/cloth')
-reader = op('/sims/cache_reader')
-reader.par.Cachedir = 'cache/phase7_showcase'
-reader.par.Member = 'cloth'
-reader.par.Interpolate = False
-reader.par.Frame.expr = ''
-reader.par.Frame = {frame}
-reader.ext.CacheReader.Reload()
-reader.ext.CacheReader.Load({frame})
-picture = reader.Output('pos')
-picture.cook(force=True)
-mat = c.op('cloth_mat')
-mat.par.sampler0top = picture.path
-c.par.Cookrender = True
-c.par.Camaz = 0.55
-c.par.Camel = 0.28
-c.par.Camdist = 2.8
-c.par.Camfov = 46
-c.par.Targetx = 0
-c.par.Targety = 0.75
-c.par.Targetz = 0
-c.op('bg_src').par.top = c.op('plate').path
-c.op('cloth_render').cook(force=True)
-c.op('composite').cook(force=True)
-image = np.asarray(c.op('picture_out').numpyArray(delayed=False), dtype=np.float32)
-np.save(project.folder + '/reports/phase7_showcase_{frame}.npy', image)
-loaded = np.asarray(picture.numpyArray(delayed=False), dtype=np.float32)
-print('@@JSON@@' + json.dumps({{'frame': {frame}, 'mean': float(image[..., :3].mean()),
-    'pos_finite': bool(np.isfinite(loaded).all())}}))
-''', timeout=90)
-        saved.append(shot)
-        print(" showcase", shot)
-    report["showcase_frames"] = saved
-    pngs = []
-    sheet_frames = []
-    report["speckle_showcase"] = {}
-    for frame in (30, 90, 150):
-        npy = REPORTS / f"phase7_showcase_{frame}.npy"
-        if npy.is_file():
-            pngs.append(save_png(npy, REPORTS / f"phase7_showcase_{frame}.png"))
-            sheet_frames.append(np.load(npy)[..., :3])
-            report["speckle_showcase"][str(frame)] = speckle_fraction(npy)
-            npy.unlink()
-    if len(sheet_frames) == 3:
-        sheet = np.concatenate(sheet_frames, axis=1)
-        sheet_npy = REPORTS / "phase7_showcase_sheet.npy"
-        np.save(sheet_npy, np.concatenate([sheet, np.ones(sheet.shape[:2] + (1,), np.float32)], axis=2))
-        pngs.append(save_png(sheet_npy, REPORTS / "phase7_showcase_sheet.png"))
-        sheet_npy.unlink()
-    report["showcase"] = {
-        "frames_written": int(manifest.get("frames_written") or 0),
-        "vertices": int(params.get("vertices") or 0),
-        "res": params.get("res"),
-        "bytes": show_bytes,
-        "complete": bool(manifest.get("complete")),
-        "frames": [row["path"] for row in pngs],
-    }
-    print("showcase", report["showcase"])
+    if not quick:
+        show = ROOT / "cache" / "phase7_showcase"
+        if show.exists():
+            shutil.rmtree(show)
+        td.run_json(textwrap.dedent(r'''
+    import json
+    op('/sims/clock/tick').par.active = False
+    c = op('/sims/cloth')
+    c.ApplyPreset('showcase')
+    c.par.Cookrender = False
+    op.simclock.par.Sims = '/sims/cloth'
+    op.simclock.par.Substeps = 1
+    op.simclock.par.Fps = 60
+    b = op('/sims/baker')
+    b.par.Sim = '/sims/cloth'
+    b.par.Groupsims = '/sims/cloth'
+    b.par.Cachedir = 'cache/phase7_showcase'
+    b.par.Framestart = 1
+    b.par.Frameend = 180
+    b.par.Warmup = 0
+    b.par.Resume = False
+    b.par.Keyinterval = 15
+    b.par.Playbackfields = 'pos'
+    b.par.Crop = False
+    b.par.Asyncsave = False
+    b.Bake()
+    print('@@JSON@@' + json.dumps({'baking': b.ext.Baker.baking, 'status': str(b.par.Status.eval())}))
+    '''), timeout=60)
+        report["showcase_bake"] = pump(td, None, 2, 120)
+        manifest_path = show / "manifest.json"
+        manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+        member = (manifest.get("members") or {}).get("cloth") or {}
+        params = member.get("params") or manifest.get("params") or {}
+        if isinstance(params, dict) and "cloth" in params and "vertices" not in params:
+            params = params["cloth"]
+        show_bytes = sum(p.stat().st_size for p in show.rglob("*") if p.is_file()) if show.exists() else 0
+        saved = []
+        for frame in (30, 90, 150):
+            shot = td.run_json(textwrap.dedent(rf'''
+    import json
+    import numpy as np
+    c = op('/sims/cloth')
+    reader = op('/sims/cache_reader')
+    reader.par.Cachedir = 'cache/phase7_showcase'
+    reader.par.Member = 'cloth'
+    reader.par.Interpolate = False
+    reader.par.Frame.expr = ''
+    reader.par.Frame = {frame}
+    reader.ext.CacheReader.Reload()
+    reader.ext.CacheReader.Load({frame})
+    picture = reader.Output('pos')
+    picture.cook(force=True)
+    mat = c.op('cloth_mat')
+    mat.par.sampler0top = picture.path
+    c.par.Cookrender = True
+    c.par.Camaz = 0.55
+    c.par.Camel = 0.28
+    c.par.Camdist = 2.8
+    c.par.Camfov = 46
+    c.par.Targetx = 0
+    c.par.Targety = 0.75
+    c.par.Targetz = 0
+    c.op('bg_src').par.top = c.op('plate').path
+    c.op('cloth_render').cook(force=True)
+    c.op('composite').cook(force=True)
+    image = np.asarray(c.op('picture_out').numpyArray(delayed=False), dtype=np.float32)
+    np.save(project.folder + '/reports/phase7_showcase_{frame}.npy', image)
+    loaded = np.asarray(picture.numpyArray(delayed=False), dtype=np.float32)
+    print('@@JSON@@' + json.dumps({{'frame': {frame}, 'mean': float(image[..., :3].mean()),
+        'pos_finite': bool(np.isfinite(loaded).all())}}))
+    '''), timeout=90)
+            saved.append(shot)
+            print(" showcase", shot)
+        report["showcase_frames"] = saved
+        pngs = []
+        sheet_frames = []
+        report["speckle_showcase"] = {}
+        for frame in (30, 90, 150):
+            npy = REPORTS / f"phase7_showcase_{frame}.npy"
+            if npy.is_file():
+                pngs.append(save_png(npy, REPORTS / f"phase7_showcase_{frame}.png"))
+                sheet_frames.append(np.load(npy)[..., :3])
+                report["speckle_showcase"][str(frame)] = speckle_fraction(npy)
+                npy.unlink()
+        if len(sheet_frames) == 3:
+            sheet = np.concatenate(sheet_frames, axis=1)
+            sheet_npy = REPORTS / "phase7_showcase_sheet.npy"
+            np.save(sheet_npy, np.concatenate([sheet, np.ones(sheet.shape[:2] + (1,), np.float32)], axis=2))
+            pngs.append(save_png(sheet_npy, REPORTS / "phase7_showcase_sheet.png"))
+            sheet_npy.unlink()
+        report["showcase"] = {
+            "frames_written": int(manifest.get("frames_written") or 0),
+            "vertices": int(params.get("vertices") or 0),
+            "res": params.get("res"),
+            "bytes": show_bytes,
+            "complete": bool(manifest.get("complete")),
+            "frames": [row["path"] for row in pngs],
+        }
+        print("showcase", report["showcase"])
+    else:
+        report["quick"] = True
+        report["showcase"] = {"skipped": True}
+        report["speckle_showcase"] = {}
+        pngs = []
 
     td.run_json(CLEAN, timeout=60)
     for npy_name in ("phase7_match.npy", "phase7_hang.npy", "phase7_rest.npy", "phase7_det_a.npy"):
@@ -976,18 +984,24 @@ print('@@JSON@@' + json.dumps({{'frame': {frame}, 'mean': float(image[..., :3].m
             return 1
         return script(*args)
 
-    report["bake_check"] = fresh(str(ROOT / "scripts" / "bake_check.py"), "--frames", "40")
-    print("bake_check", report["bake_check"])
-    report["phase2"] = fresh(str(ROOT / "scripts" / "validate_phase2.py"))
-    print("phase2", report["phase2"])
-    report["phase3"] = fresh(str(ROOT / "scripts" / "validate_phase3.py"))
-    print("phase3", report["phase3"])
-    report["phase4"] = fresh(str(ROOT / "scripts" / "validate_phase4.py"), "--quick")
-    print("phase4", report["phase4"])
-    report["phase5"] = fresh(str(ROOT / "scripts" / "validate_phase5.py"), "--quick")
-    print("phase5", report["phase5"])
-    report["phase6"] = fresh(str(ROOT / "scripts" / "validate_phase6.py"), "--quick")
-    print("phase6", report["phase6"])
+    # --no-regressions is for a caller that runs every earlier phase itself, each in a fresh session.
+    if regressions:
+        report["bake_check"] = fresh(str(ROOT / "scripts" / "bake_check.py"), "--frames", "40")
+        print("bake_check", report["bake_check"])
+        report["phase2"] = fresh(str(ROOT / "scripts" / "validate_phase2.py"))
+        print("phase2", report["phase2"])
+        report["phase3"] = fresh(str(ROOT / "scripts" / "validate_phase3.py"))
+        print("phase3", report["phase3"])
+        report["phase4"] = fresh(str(ROOT / "scripts" / "validate_phase4.py"), "--quick")
+        print("phase4", report["phase4"])
+        report["phase5"] = fresh(str(ROOT / "scripts" / "validate_phase5.py"), "--quick")
+        print("phase5", report["phase5"])
+        report["phase6"] = fresh(str(ROOT / "scripts" / "validate_phase6.py"), "--quick")
+        print("phase6", report["phase6"])
+    else:
+        report["regressions"] = "run by the caller"
+        for name in ("bake_check", "phase2", "phase3", "phase4", "phase5", "phase6"):
+            report[name] = 0
     report["shaders"] = script(str(ROOT / "scripts" / "check_shaders.py"))
     report["pytest"] = script("-m", "pytest", "-q")
     td = attach()
@@ -1034,7 +1048,7 @@ print('@@JSON@@' + json.dumps({{'frame': {frame}, 'mean': float(image[..., :3].m
         and report["flutter"]["picture_diff"] >= 1e-3
         and report["flutter"]["mean_z_1"] > report["flutter"]["pin_z"] + 0.02
         and all(row["fraction"] <= 0.05 and row["cloth_pixels"] > 200 for row in report["speckle"].values())
-        and all(row["fraction"] <= 0.05 and row["cloth_pixels"] > 200 for row in report["speckle_showcase"].values())
+        and (quick or all(row["fraction"] <= 0.05 and row["cloth_pixels"] > 200 for row in report["speckle_showcase"].values()))
         and scene.get("fluid_res") == [48, 48, 48]
         and scene.get("fluid_solver") == "jacobi"
         and "fluid3d" in str(scene.get("sims"))
@@ -1046,10 +1060,10 @@ print('@@JSON@@' + json.dumps({{'frame': {frame}, 'mean': float(image[..., :3].m
         and not scene.get("errors")
         and report["bake"]["identical"] is True
         and report["replay"]["pos_max_abs"] < 1e-5
-        and int(show.get("frames_written") or 0) >= 180
-        and int(show.get("vertices") or 0) >= 128 * 128
-        and show["bytes"] <= SHOWCASE_BUDGET
-        and show.get("complete") is True
+        and (quick or int(show.get("frames_written") or 0) >= 180)
+        and (quick or int(show.get("vertices") or 0) >= 128 * 128)
+        and (quick or show["bytes"] <= SHOWCASE_BUDGET)
+        and (quick or show.get("complete") is True)
         and not flag_png["checker"]
         and not drape_png["checker"]
         and flag_png["min_alpha"] >= 0.99
@@ -1059,8 +1073,8 @@ print('@@JSON@@' + json.dumps({{'frame': {frame}, 'mean': float(image[..., :3].m
         and flag_png["blown"] < 0.05
         and drape_png["blown"] < 0.02
         and report["png_diff"] >= 1e-3
-        and len(pngs) == 4
-        and all(not row["checker"] for row in pngs)
+        and (quick or len(pngs) == 4)
+        and (quick or all(not row["checker"] for row in pngs))
         and not abs_path_strings(report)
         and report["bake_check"] == 0
         and report["phase2"] == 0
@@ -1080,4 +1094,9 @@ print('@@JSON@@' + json.dumps({{'frame': {frame}, 'mean': float(image[..., :3].m
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--quick", action="store_true", help="skip the 180-frame showcase bake")
+    ap.add_argument("--no-regressions", action="store_true", help="the caller runs the earlier phases itself")
+    args = ap.parse_args()
+    sys.exit(main(quick=args.quick, regressions=not args.no_regressions))

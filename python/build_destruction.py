@@ -38,6 +38,7 @@ def build_destruction(sims, bn):
         bn.par(comp, "Sim", "float", name, default)
     bn.par(comp, "Sim", "float", "Pressurethresh", 1.5, label="Pressure Threshold")
     bn.par(comp, "Sim", "float", "Fluiddrag", 0.0)
+    bn.par(comp, "Sim", "int", "Debrisn", 12, minmax=(1, 256), label="Debris Per Break")
     bn.par(comp, "Sim", "float", "Dustsigma", 0.08)
     bn.par(comp, "Sim", "float", "Dustheat", 2.0)
     bn.par(comp, "Sim", "int", "Dustcount", 48, minmax=(1, 64))

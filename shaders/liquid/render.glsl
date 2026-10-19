@@ -7,16 +7,43 @@ uniform vec4 uTarget;
 uniform vec4 uLight;
 uniform vec4 uRay;
 uniform vec4 uLook; // x absorption, y specular, z fresnel, w unused
+uniform vec4 uSmooth; // x > 0.5 blurs phi by one cell. 0 is the raw grid surface.
 
 vec3 worldToUV(vec3 p)
 {
 	return (p - uBMin.xyz) / max(uBMax.xyz - uBMin.xyz, vec3(1e-6));
 }
 
+// texture() on a 3D input from this pixel shader reads a missing mip and returns the checker.
+float volR(sampler3D tex, vec3 uv)
+{
+	ivec3 size = textureSize(tex, 0);
+	ivec3 ijk = clamp(ivec3(clamp(uv, vec3(0.0), vec3(1.0)) * vec3(size)), ivec3(0), size - ivec3(1));
+	return texelFetch(tex, ijk, 0).r;
+}
+
+float liquidPhi(vec3 uv)
+{
+	// One-cell blur of the particle phi. The grid-resolution surface is faceted; averaging the
+	// neighbouring cells moves the zero crossing off the voxel faces. Solids are not blurred.
+	if (uSmooth.x < 0.5)
+		return volR(sTD3DInputs[0], uv);
+	vec3 t = 1.0 / vec3(textureSize(sTD3DInputs[0], 0));
+	vec3 c = clamp(uv, vec3(0.0), vec3(1.0));
+	float acc = volR(sTD3DInputs[0], c) * 2.0;
+	acc += volR(sTD3DInputs[0], c + vec3(t.x, 0.0, 0.0));
+	acc += volR(sTD3DInputs[0], c - vec3(t.x, 0.0, 0.0));
+	acc += volR(sTD3DInputs[0], c + vec3(0.0, t.y, 0.0));
+	acc += volR(sTD3DInputs[0], c - vec3(0.0, t.y, 0.0));
+	acc += volR(sTD3DInputs[0], c + vec3(0.0, 0.0, t.z));
+	acc += volR(sTD3DInputs[0], c - vec3(0.0, 0.0, t.z));
+	return acc / 8.0;
+}
+
 float scenePhi(vec3 uv)
 {
-	float liquid = texture(sTD3DInputs[0], clamp(uv, vec3(0.0), vec3(1.0))).r;
-	float solid = texture(sTD3DInputs[1], clamp(uv, vec3(0.0), vec3(1.0))).r;
+	float liquid = liquidPhi(uv);
+	float solid = volR(sTD3DInputs[1], uv);
 	// Draw the solid when it is closer than the liquid surface (more negative, or liquid is outside).
 	if (solid < liquid)
 		return solid;
@@ -86,8 +113,8 @@ void main()
 				vec3 n = normalize(sceneGrad(uv) + vec3(0.0, 1e-4, 0.0));
 				if (dot(n, rd) > 0.0)
 					n = -n;
-				float solid = texture(sTD3DInputs[1], uv).r;
-				float liquid = texture(sTD3DInputs[0], uv).r;
+				float solid = volR(sTD3DInputs[1], uv);
+				float liquid = volR(sTD3DInputs[0], uv);
 				bool isSolid = solid < liquid;
 				float ndl = clamp(dot(n, light), 0.0, 1.0);
 				float fres = pow(1.0 - clamp(dot(n, -rd), 0.0, 1.0), 3.0);

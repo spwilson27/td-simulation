@@ -29,7 +29,7 @@
       },
       {
         "step": 220,
-        "speed": 2.637552499771118,
+        "speed": 2.639155149459839,
         "finite": true,
         "temp": 4.09765625,
         "smoke": 0.77685546875
@@ -38,22 +38,22 @@
         "step": 320,
         "speed": 2.450044631958008,
         "finite": true,
-        "temp": 4.640625,
-        "smoke": 0.787109375
+        "temp": 4.63671875,
+        "smoke": 0.7861328125
       },
       {
         "step": 420,
-        "speed": 3.145200729370117,
+        "speed": 3.415247678756714,
         "finite": true,
-        "temp": 4.3125,
-        "smoke": 0.734375
+        "temp": 4.3203125,
+        "smoke": 0.7353515625
       },
       {
         "step": 520,
-        "speed": 2.386465549468994,
+        "speed": 2.384138584136963,
         "finite": true,
-        "temp": 4.83984375,
-        "smoke": 0.8095703125
+        "temp": 4.8359375,
+        "smoke": 0.81005859375
       }
     ],
     "finite": true,
@@ -87,29 +87,29 @@
     "err": ""
   },
   "uncapped": {
-    "steps": 271,
-    "frames": 271,
-    "fps": 90.33
+    "steps": 288,
+    "frames": 288,
+    "fps": 96.0
   },
   "capped": {
-    "steps": 183,
-    "frames": 183,
-    "fps": 61.0
+    "steps": 185,
+    "frames": 185,
+    "fps": 61.67
   },
   "pressure": {
     "jacobi12": {
-      "seconds": 0.0032403749646618962,
+      "seconds": 0.004189583007246256,
       "div_pre": 0.050596680492162704,
       "div_post": 0.02546836994588375
     },
     "multigrid": {
-      "seconds": 0.00607266603037715,
+      "seconds": 0.007225541980005801,
       "div_pre": 0.05933103710412979,
       "div_post": 0.03795059025287628
     }
   },
   "full_bake": {
-    "status": "complete: 24 frames in 3.9s",
+    "status": "complete: 24 frames in 4.2s",
     "baking": false,
     "frame": 24,
     "pumped": 8,
@@ -135,14 +135,14 @@
     "status": "fluid3d 128x128x128 complete"
   },
   "cancelled": {
-    "status": "cancelled: 16 frames in 2.4s",
+    "status": "cancelled: 16 frames in 2.5s",
     "baking": false,
     "frame": 16,
     "pumped": 0,
     "replay": null
   },
   "resumed": {
-    "status": "complete: 8 frames in 1.6s",
+    "status": "complete: 8 frames in 1.7s",
     "baking": false,
     "frame": 24,
     "pumped": 8,

@@ -515,7 +515,8 @@ p.par.Srcheat = 0
 p.par.Cookrender = False
 p.SetInit(None)
 for name in ('step_2d_pos', 'step_2d_vel', 'step_3d_pos', 'step_3d_vel', 'deposit_2d', 'deposit_3d',
-             'splat_render', 'splat_sum', 'splat_vol', 'forces_3d', 'sources_3d', 'beauty_render', 'beauty', 'emissive'):
+             'splat_render', 'splat_count', 'splat_scan', 'splat_base', 'splat_scatter', 'splat_sum',
+             'splat_part', 'splat_fence', 'splat_vol', 'forces_3d', 'sources_3d', 'beauty_render', 'beauty', 'emissive'):
     node = p.op(name)
     if node is not None:
         node.bypass = True
@@ -837,15 +838,11 @@ def group_bake(td) -> dict:
     rel_a = [p.relative_to(ROOT / full) for p in a_files]
     rel_b = [p.relative_to(ROOT / resume) for p in b_files]
     mismatched = [str(r) for r in rel_a if r not in rel_b or (ROOT / full / r).read_bytes() != (ROOT / resume / r).read_bytes()]
-    # Particle velocity is snapped to 1e-4 and a resumed fluid sample can still flip one value across a snap
-    # boundary. Everything else must be byte-identical; pvel may differ by at most two snap steps.
+    # Coupled resume is byte-exact. pvel_max_diff is diagnostic only: a non-zero value fails the check.
     pvel_max = 0.0
-    hard = []
     for rel in mismatched:
         if rel.startswith("particles/pvel/") and (ROOT / resume / rel).exists():
             pvel_max = max(pvel_max, _cache_max_diff(ROOT / full / rel, ROOT / resume / rel))
-        else:
-            hard.append(rel)
     stale = td.run_json(GROUP_STALE, timeout=30)
     for path in (ROOT / full, ROOT / resume):
         if path.exists():
@@ -859,7 +856,7 @@ def group_bake(td) -> dict:
         "mismatched": mismatched[:8],
         "mismatched_count": len(mismatched),
         "pvel_max_diff": pvel_max,
-        "identical": not hard and pvel_max <= 2.5e-4 and rel_a == rel_b and len(a_files) > 0,
+        "identical": not mismatched and rel_a == rel_b and len(a_files) > 0,
         "replay_fluid": None if any(v is None for v in fluid_diffs) else max(fluid_diffs),
         "replay_particles": None if any(v is None for v in part_diffs) else max(part_diffs),
         "stale": stale,
